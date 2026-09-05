@@ -343,7 +343,9 @@ class Conformance:
         exempt = {"/", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
         missing = spec_paths - live_paths
         extra = {p for p in live_paths - spec_paths if p not in exempt}
-        ok = not missing
+        # Bidirectional freeze: an app route missing from the spec AND a spec
+        # path missing from the app are both drift — either fails the check.
+        ok = not missing and not extra
         detail = f"missing_from_app={sorted(missing)} extra_in_app={sorted(extra)}"
         self.record("contract_drift", ok, detail)
 
