@@ -1010,6 +1010,11 @@ print("Answers saved to answers.json")
 
 ### Real-time Streaming (Python)
 
+`POST /ask/stream` emits Server-Sent Events (SSE): one `message` event per
+token, then exactly one terminal event — a `done` payload (with `sources`,
+`context_length`, `inference_time`) or an `error` payload. The full contract is
+frozen in `contracts/api.openapi.yaml`.
+
 ```python
 import requests
 import json
@@ -1017,18 +1022,26 @@ import json
 BASE_URL = "http://localhost:8080"
 
 response = requests.post(
-    f"{BASE_URL}/ask",
+    f"{BASE_URL}/ask/stream",
     json={"question": "Tell me about the project"},
-    stream=True
+    stream=True,
 )
 
-for line in response.iter_lines():
-    if line:
-        data = json.loads(line.decode())
-        if data.get('type') == 'chunk':
-            print(data['text'], end='', flush=True)
-
-print("\n")
+for line in response.iter_lines(decode_unicode=True):
+    if not line or not line.startswith("data: "):
+        continue
+    payload = json.loads(line[len("data: "):])
+    if "token" in payload:
+        print(payload["token"], end="", flush=True)
+    elif payload.get("done"):
+        if payload.get("cancelled"):
+            print("\n[cancelled]")
+        else:
+            print(f"\n[sources: {payload['sources']}]")
+        break
+    elif "error" in payload:
+        print(f"\n[error: {payload['error']}]")
+        break
 ```
 
 ## Common Workflows

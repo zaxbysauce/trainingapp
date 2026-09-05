@@ -3,37 +3,35 @@ Document Q&A API Server
 FastAPI-based REST API for the RAG system.
 """
 
+import asyncio
+import contextlib
+import json
+import logging
 import os
 import sys
-import json
-import re
-import socket
-import logging
-import asyncio
+import threading
 import unicodedata
-from typing import Optional, Set, Tuple, List, Dict
-from pathlib import Path
-from contextlib import asynccontextmanager
-from urllib.parse import urlparse, unquote
-import ipaddress
-
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Security, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import unquote
+
+from fastapi import FastAPI, File, HTTPException, Request, Security, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
 
-from rag_engine import RAGEngine, RAGConfig
+from auth import get_auth_status, require_auth
+from config import get_settings, settings
 from llm_interface import QueryCancelled
-from security import validate_url, validate_device, DEFAULT_ALLOWED_PORTS
-from auth import authenticate, require_auth, get_auth_status, API_KEY, create_access_token
-from config import settings, get_settings
+from rag_engine import RAGConfig, RAGEngine
 
 # SSE streaming support (pip install sse-starlette)
 try:
     from sse_starlette.sse import EventSourceResponse
+
     HAS_SSE = True
 except ImportError:
     HAS_SSE = False
@@ -45,19 +43,19 @@ logger = logging.getLogger(__name__)
 def _resolve_and_validate_path(path: str, base_dir: Path = Path(".")) -> Path:
     """Shared path resolution and validation for model and directory paths."""
     normalized_path = unquote(path)
-    
+
     if not path:
         raise ValueError("Path cannot be empty")
-    
+
     if ".." in normalized_path:
         raise ValueError("Path contains path traversal attempts")
-    
+
     # Reject null bytes — can truncate paths on some systems
     if "\x00" in normalized_path:
         raise ValueError("Path contains null bytes")
-    
+
     input_path = Path(normalized_path)
-    
+
     if input_path.is_absolute():
         resolved_path = input_path.resolve(strict=False)
     else:
@@ -66,7 +64,7 @@ def _resolve_and_validate_path(path: str, base_dir: Path = Path(".")) -> Path:
             resolved_path.relative_to(base_dir.resolve())
         except ValueError:
             raise ValueError("Path is outside the allowed directory")
-    
+
     return resolved_path
 
 
@@ -188,7 +186,7 @@ class QuestionRequest(BaseModel):
         default=None,
         max_items=20,
         description="Prior conversation turns, each with `role` and `content`. "
-                    "At most 20 turns; each `content` value is truncated to 4000 chars.",
+        "At most 20 turns; each `content` value is truncated to 4000 chars.",
     )
 
     @validator("question")
@@ -205,7 +203,9 @@ class QuestionRequest(BaseModel):
             raise ValueError("History exceeds maximum of 20 turns")
         for turn in v:
             if not isinstance(turn, dict):
-                raise ValueError("Each history turn must be a dict with 'role' and 'content'")
+                raise ValueError(
+                    "Each history turn must be a dict with 'role' and 'content'"
+                )
             content = turn.get("content", "")
             if isinstance(content, str) and len(content) > 4000:
                 turn["content"] = content[:4000]
@@ -411,7 +411,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_cors_origins_list(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -438,7 +438,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     errors = exc.errors()
     detail_lines = []
     for err in errors:
-        loc = ".".join(str(l) for l in err["loc"])
+        loc = ".".join(str(part) for part in err["loc"])
         detail_lines.append(f"{loc}: {err['msg']}")
     return JSONResponse(
         status_code=422,
@@ -486,6 +486,12 @@ async def auth_status():
     return get_auth_status()
 
 
+@app.get("/health")
+async def health():
+    """Unauthenticated liveness probe for renderer/Electron hosts."""
+    return {"status": "ok", "engine_ready": engine is not None}
+
+
 @app.post("/auth/token")
 async def login(request: LoginRequest):
     """
@@ -495,7 +501,7 @@ async def login(request: LoginRequest):
         - access_token: JWT token
         - token_type: "bearer"
     """
-    from auth import ENABLE_AUTH, API_KEY, create_access_token
+    from auth import API_KEY, ENABLE_AUTH, create_access_token
 
     if not ENABLE_AUTH:
         raise HTTPException(
@@ -528,9 +534,7 @@ async def get_stats(auth: dict = Security(require_auth())):
 
 
 @app.post("/ask", response_model=QuestionResponse)
-async def ask_question(
-    request: QuestionRequest, auth: dict = Security(require_auth())
-):
+async def ask_question(request: QuestionRequest, auth: dict = Security(require_auth())):
     """Ask a question about the ingested documents."""
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not initialized")
@@ -569,7 +573,9 @@ async def search_documents(
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        results = await asyncio.to_thread(engine.search_documents, request.query, n_results=request.n_results)
+        results = await asyncio.to_thread(
+            engine.search_documents, request.query, n_results=request.n_results
+        )
         return [
             SearchResult(text=doc, source=meta.get("source", "Unknown"), similarity=sim)
             for doc, meta, sim in results
@@ -628,7 +634,8 @@ async def ingest_file(
     if file_size > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large. Maximum size is 50MB. Uploaded file is {file_size / (1024 * 1024):.1f}MB",
+            detail="File too large. Maximum size is 50MB. Uploaded file is "
+            f"{file_size / (1024 * 1024):.1f}MB",
         )
 
     # Sanitize filename
@@ -659,8 +666,8 @@ async def ingest_file(
             chunks_added=stats.get("chunks_added", 0),
             message=stats.get("message"),
         )
-    except Exception as e:
-        logger.error("Error in ingest_file: %s", e)
+    except Exception as exc:
+        logger.error("Error in ingest_file: %s", exc)
         raise HTTPException(
             status_code=500, detail="An error occurred ingesting the file"
         )
@@ -696,6 +703,7 @@ async def list_documents(auth: dict = Security(require_auth())):
 
 
 if HAS_SSE:
+
     @app.post("/ask/stream")
     async def ask_question_stream(
         request: QuestionRequest, auth: dict = Security(require_auth())
@@ -708,69 +716,122 @@ if HAS_SSE:
             raise HTTPException(status_code=503, detail="No LLM backend available")
 
         async def event_generator():
-            queue = asyncio.Queue()
-            sources = []
+            queue: asyncio.Queue = asyncio.Queue()
+            cancellation_event = threading.Event()
+            # True while the generator is still able to yield. Once the client
+            # disconnects (GeneratorExit/CancelledError) no further yield is
+            # attempted, including from the QueryCancelled arm below.
+            stream_open = True
+            sources: List[str] = []
             context_length = 0
             inference_time = 0.0
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def stream_callback(token: str):
-                # Called from background thread — put token into async queue
-                loop.call_soon_threadsafe(queue.put_nowait, {"token": token})
+                # Called from the worker thread — bridge the token into the
+                # loop's queue. A loop already closed during shutdown must not
+                # raise inside the engine thread.
+                try:
+                    loop.call_soon_threadsafe(queue.put_nowait, {"token": token})
+                except RuntimeError:
+                    pass
 
-            # Run query in thread, callback will feed queue
-            query_future = asyncio.to_thread(
-                engine.query,
-                request.question,
-                n_results=request.n_results,
-                stream_callback=stream_callback,
-                conversation_history=request.history,  # Issue #37 R6
+            # Issue #51: schedule the blocking query as a real task (the old
+            # code assigned the unawaited asyncio.to_thread coroutine and then
+            # called .done()/.result() on it, so the query never ran) and pass
+            # a cancellation_event so a client disconnect stops generation.
+            query_task = asyncio.create_task(
+                asyncio.to_thread(
+                    engine.query,
+                    request.question,
+                    n_results=request.n_results,
+                    stream_callback=stream_callback,
+                    conversation_history=request.history,  # Issue #37 R6
+                    cancellation_event=cancellation_event,
+                )
             )
 
             try:
                 while True:
-                    try:
-                        msg = await asyncio.wait_for(queue.get(), timeout=0.1)
+                    queue_get_task = asyncio.create_task(queue.get())
+                    done_set, _ = await asyncio.wait(
+                        {queue_get_task, query_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if queue_get_task in done_set:
+                        msg = queue_get_task.result()
                         yield {"event": "message", "data": json.dumps(msg)}
-                    except asyncio.TimeoutError:
-                        if query_future.done():
-                            break
+                        if query_task.done():
+                            break  # last token raced the finish; terminal below
                         continue
+                    # Query finished before the next token arrived.
+                    queue_get_task.cancel()
+                    break
 
-                # Drain remaining queue items
+                # Drain tokens queued before the finish (call_soon_threadsafe
+                # callbacks scheduled before task completion run before this
+                # coroutine resumes, so nothing is lost).
                 while not queue.empty():
                     msg = queue.get_nowait()
                     yield {"event": "message", "data": json.dumps(msg)}
 
-                result = query_future.result()  # Raises if query failed
+                result = query_task.result()  # Raises if query failed/cancelled
                 sources = result.sources
                 context_length = result.context_length
                 inference_time = result.inference_time
 
                 yield {
                     "event": "message",
-                    "data": json.dumps({
-                        "done": True,
-                        "sources": sources,
-                        "context_length": context_length,
-                        "inference_time": inference_time,
-                    }),
+                    "data": json.dumps(
+                        {
+                            "done": True,
+                            "sources": sources,
+                            "context_length": context_length,
+                            "inference_time": inference_time,
+                        }
+                    ),
                 }
             except QueryCancelled:
-                yield {
-                    "event": "message",
-                    "data": json.dumps({
-                        "done": True,
-                        "cancelled": True,
-                        "sources": sources,
-                    }),
-                }
+                # Renderer done-detection (streaming.ts) requires sources AND
+                # context_length in the terminal payload.
+                if stream_open:
+                    yield {
+                        "event": "message",
+                        "data": json.dumps(
+                            {
+                                "done": True,
+                                "cancelled": True,
+                                "sources": sources,
+                                "context_length": 0,
+                                "inference_time": 0.0,
+                            }
+                        ),
+                    }
             except Exception as e:
                 logger.error("Error in ask_question_stream: %s", e)
-                yield {
-                    "event": "error",
-                    "data": json.dumps({"error": "An error occurred processing your question"}),
-                }
+                if stream_open:
+                    yield {
+                        "event": "error",
+                        "data": json.dumps(
+                            {"error": "An error occurred processing your question"}
+                        ),
+                    }
+            finally:
+                stream_open = False
+                if not query_task.done():
+                    # Client went away mid-generation: stop the engine and reap
+                    # the abandoned task so its exception is always retrieved.
+                    cancellation_event.set()
+                    query_task.cancel()
+
+                    def _reap_abandoned(task: "asyncio.Task"):
+                        with contextlib.suppress(BaseException):
+                            task.result()
+
+                    query_task.add_done_callback(_reap_abandoned)
+                else:
+                    with contextlib.suppress(BaseException):
+                        query_task.result()
 
         return EventSourceResponse(event_generator())
 
@@ -800,11 +861,13 @@ async def ingest_batch(
 
     for file in files:
         if not file.filename:
-            results.append(BatchFileResult(
-                filename="unknown",
-                success=False,
-                error="Filename is required",
-            ))
+            results.append(
+                BatchFileResult(
+                    filename="unknown",
+                    success=False,
+                    error="Filename is required",
+                )
+            )
             failed += 1
             continue
 
@@ -813,33 +876,48 @@ async def ingest_batch(
         file_size = len(file_content)
 
         if file_size > MAX_FILE_SIZE:
-            results.append(BatchFileResult(
-                filename=file.filename,
-                success=False,
-                error=f"File too large. Maximum size is 50MB.",
-            ))
+            results.append(
+                BatchFileResult(
+                    filename=file.filename,
+                    success=False,
+                    error="File too large. Maximum size is 50MB.",
+                )
+            )
             failed += 1
             continue
 
         # Sanitize filename
         try:
             safe_filename, display_name = sanitize_filename(file.filename)
-        except ValueError as e:
-            results.append(BatchFileResult(
-                filename=file.filename,
-                success=False,
-                error="Invalid filename",
-            ))
+        except ValueError:
+            results.append(
+                BatchFileResult(
+                    filename=file.filename,
+                    success=False,
+                    error="Invalid filename",
+                )
+            )
             failed += 1
             continue
 
         ext = Path(safe_filename).suffix.lower()
-        if ext not in {".pdf", ".docx", ".doc", ".pptx", ".ppt", ".txt", ".md", ".xlsx"}:
-            results.append(BatchFileResult(
-                filename=file.filename,
-                success=False,
-                error=f"Unsupported file type: {ext}",
-            ))
+        if ext not in {
+            ".pdf",
+            ".docx",
+            ".doc",
+            ".pptx",
+            ".ppt",
+            ".txt",
+            ".md",
+            ".xlsx",
+        }:
+            results.append(
+                BatchFileResult(
+                    filename=file.filename,
+                    success=False,
+                    error=f"Unsupported file type: {ext}",
+                )
+            )
             failed += 1
             continue
 
@@ -853,26 +931,32 @@ async def ingest_batch(
 
             if stats["success"]:
                 successful += 1
-                results.append(BatchFileResult(
-                    filename=file.filename,
-                    success=True,
-                    chunks_added=stats.get("chunks_added", 0),
-                ))
+                results.append(
+                    BatchFileResult(
+                        filename=file.filename,
+                        success=True,
+                        chunks_added=stats.get("chunks_added", 0),
+                    )
+                )
             else:
                 failed += 1
-                results.append(BatchFileResult(
-                    filename=file.filename,
-                    success=False,
-                    error=stats.get("message", "Unknown error"),
-                ))
+                results.append(
+                    BatchFileResult(
+                        filename=file.filename,
+                        success=False,
+                        error=stats.get("message", "Unknown error"),
+                    )
+                )
         except Exception as e:
             logger.error("Error in ingest_batch for file %s: %s", file.filename, e)
             failed += 1
-            results.append(BatchFileResult(
-                filename=file.filename,
-                success=False,
-                error="An error occurred ingesting the file",
-            ))
+            results.append(
+                BatchFileResult(
+                    filename=file.filename,
+                    success=False,
+                    error="An error occurred ingesting the file",
+                )
+            )
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
@@ -999,7 +1083,10 @@ def main():
     """Run the API server."""
     import uvicorn
 
-    host = os.environ.get("API_HOST", "0.0.0.0")  # nosec: B104 — intentional, configurable via API_HOST env var
+    # Issue #51: default to loopback — with auth disabled by default (auth.py)
+    # an all-interfaces bind would expose an unauthenticated document API to
+    # the LAN. Binding out requires an explicit API_HOST=0.0.0.0 opt-in.
+    host = os.environ.get("API_HOST", "127.0.0.1")
     port = int(os.environ.get("API_PORT", "8080"))
 
     print(f"Starting server on {host}:{port}")

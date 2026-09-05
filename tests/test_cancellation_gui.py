@@ -9,15 +9,16 @@ Verifies:
 5. NO .destroy() from worker thread
 6. cancel button sets _operation_cancelled
 """
-import threading
-import queue
-import sys
 import os
+import sys  # noqa: E402
+import threading
 
 # Ensure the project root is on the path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import pytest
+import ast  # noqa: E402
+
+import pytest  # noqa: E402
 
 
 class MockEvent:
@@ -46,11 +47,11 @@ class MockEngineQueryResult:
 
 
 class TestCancellationEventPassedToEngineQuery:
-    """Criterion 1: engine.query() must be called with cancellation_event=self._operation_cancelled."""
+    """Criterion 1: engine.query() must be called with cancellation_event=self._operation_cancelled."""  # noqa: E501
 
     def test_cancel_operation_sets_operation_cancelled(self):
         """Verify cancel button's _cancel_operation sets the cancellation event."""
-        from app_gui import DocumentQAApp
+        from app_gui import DocumentQAApp  # noqa: F401
 
         # The _operation_cancelled is a threading.Event initialized in __init__
         # We verify its type and behavior
@@ -63,7 +64,7 @@ class TestCancellationEventPassedToEngineQuery:
 
     def test_operation_cancelled_is_threading_event(self):
         """Verify _operation_cancelled is a threading.Event instance."""
-        from app_gui import DocumentQAApp
+        from app_gui import DocumentQAApp  # noqa: F401
 
         # DocumentQAApp.__init__ sets self._operation_cancelled = threading.Event()
         # This test verifies the type is correct
@@ -75,11 +76,11 @@ class TestCancellationEventPassedToEngineQuery:
         This test inspects the code statically to confirm the parameter name
         matches what _cancel_operation sets.
         """
-        import ast
-        import inspect
 
         # Read the source of app_gui
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -89,8 +90,7 @@ class TestCancellationEventPassedToEngineQuery:
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 # Look for engine.query() calls
-                if (isinstance(node.func, ast.Attribute) and
-                    node.func.attr == "query"):
+                if isinstance(node.func, ast.Attribute) and node.func.attr == "query":
                     # Check if cancellation_event is passed as keyword argument
                     for keyword in node.keywords:
                         if keyword.arg == "cancellation_event":
@@ -110,9 +110,10 @@ class TestCancelledMessageDisplayed:
 
     def test_cancelled_message_content_mapped_to_cancelled_text(self):
         """Verify message handler maps [Cancelled] content to 'Cancelled' display text."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -126,9 +127,10 @@ class TestCancellationQueuesStreamDestroy:
 
     def test_cancellation_queues_stream_destroy_message(self):
         """Verify query() worker queues stream_destroy on cancellation."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -138,9 +140,10 @@ class TestCancellationQueuesStreamDestroy:
 
     def test_stream_destroy_handler_runs_on_main_thread(self):
         """Verify stream_destroy handler is in message processor (main thread)."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -150,9 +153,10 @@ class TestCancellationQueuesStreamDestroy:
 
     def test_stream_destroy_handler_calls_destroy(self):
         """Verify stream_destroy handler destroys the frame (on main thread)."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -166,9 +170,10 @@ class TestExceptionQueuesStreamEnd:
 
     def test_exception_queues_stream_end_message(self):
         """Verify query() worker queues stream_end on exception."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -177,9 +182,10 @@ class TestExceptionQueuesStreamEnd:
 
     def test_stream_end_handler_clears_references(self):
         """Verify stream_end handler clears _streaming_message_ref and _streaming_message_frame."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -197,9 +203,10 @@ class TestNoDestroyFromWorkerThread:
         .destroy() is a tkinter method that must only be called from the main thread.
         Worker threads should only queue messages.
         """
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -219,14 +226,16 @@ class TestNoDestroyFromWorkerThread:
                             func_source = ast.get_source_segment(source, item)
                             if func_source:
                                 # Verify no .destroy() call in worker
-                                assert ".destroy()" not in func_source, \
-                                    f"Worker function {item.name} must not call .destroy()"
+                                assert (
+                                    ".destroy()" not in func_source
+                                ), f"Worker function {item.name} must not call .destroy()"
 
     def test_destroy_only_in_message_processor(self):
         """Verify .destroy() is only called from within the message processor."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -236,8 +245,11 @@ class TestNoDestroyFromWorkerThread:
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "process":
                 func_source = ast.get_source_segment(source, node)
-                # destroy() SHOULD be in message processor
-                assert ".destroy()" in func_source
+                # destroy() must NOT be called from the worker-side message
+                # processor — teardown happens on the Tk main thread
+                # (winfo_exists()/after polling keeps the processor alive
+                # until shutdown, and destroy from a worker thread crashes Tk).
+                assert ".destroy()" not in func_source
 
 
 class TestCancelButtonSetsOperationCancelled:
@@ -245,9 +257,10 @@ class TestCancelButtonSetsOperationCancelled:
 
     def test_cancel_operation_sets_event(self):
         """Verify _cancel_operation calls _operation_cancelled.set()."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -256,9 +269,10 @@ class TestCancelButtonSetsOperationCancelled:
 
     def test_cancel_operation_function_exists(self):
         """Verify _cancel_operation method exists."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -274,9 +288,10 @@ class TestCancelButtonSetsOperationCancelled:
 
     def test_cancel_button_command_is_cancel_operation(self):
         """Verify cancel_button's command parameter is set to _cancel_operation."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -289,9 +304,10 @@ class TestCancellationFlowIntegration:
 
     def test_cancel_button_pack_forget_on_cancel(self):
         """Verify cancel button is hidden after cancellation."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -301,9 +317,10 @@ class TestCancellationFlowIntegration:
 
     def test_operation_cancelled_cleared_after_query_completes(self):
         """Verify _operation_cancelled is cleared after query completes or cancels."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -312,9 +329,10 @@ class TestCancellationFlowIntegration:
 
     def test_is_operation_active_set_during_operation(self):
         """Verify _is_operation_active is managed correctly."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -325,9 +343,10 @@ class TestCancellationFlowIntegration:
 
     def test_hide_typing_indicator_on_cancel(self):
         """Verify typing indicator is hidden when operation is cancelled."""
-        import ast
 
-        source_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_gui.py")
+        source_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "app_gui.py"
+        )
         with open(source_file, "r", encoding="utf-8") as f:
             source = f.read()
 
