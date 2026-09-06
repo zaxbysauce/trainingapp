@@ -28,6 +28,12 @@ from config import get_settings, settings
 from llm_interface import QueryCancelled
 from rag_engine import RAGConfig, RAGEngine
 
+# rag_engine converts a cancelled query into a normal QueryResult whose answer
+# is this sentinel instead of re-raising QueryCancelled, so the stream handler
+# detects cancellation from the result itself (app_gui.py matches the same
+# literal for the same reason).
+CANCELLED_ANSWER = "[Cancelled]"
+
 # SSE streaming support (pip install sse-starlette)
 try:
     from sse_starlette.sse import EventSourceResponse
@@ -780,17 +786,39 @@ if HAS_SSE:
                 context_length = result.context_length
                 inference_time = result.inference_time
 
-                yield {
-                    "event": "message",
-                    "data": json.dumps(
-                        {
-                            "done": True,
-                            "sources": sources,
-                            "context_length": context_length,
-                            "inference_time": inference_time,
+                if cancellation_event.is_set() or result.answer == CANCELLED_ANSWER:
+                    # rag_engine swallows QueryCancelled and returns a sentinel
+                    # result (answer == CANCELLED_ANSWER) instead of re-raising,
+                    # so detect a cancelled query from the result itself (the
+                    # event check covers engines that only signal via
+                    # cancellation_event) and surface it to the renderer via
+                    # the cancelled-done payload (which still carries
+                    # sources/context_length per the done-detection contract).
+                    if stream_open:
+                        yield {
+                            "event": "message",
+                            "data": json.dumps(
+                                {
+                                    "done": True,
+                                    "cancelled": True,
+                                    "sources": sources,
+                                    "context_length": context_length,
+                                    "inference_time": inference_time,
+                                }
+                            ),
                         }
-                    ),
-                }
+                else:
+                    yield {
+                        "event": "message",
+                        "data": json.dumps(
+                            {
+                                "done": True,
+                                "sources": sources,
+                                "context_length": context_length,
+                                "inference_time": inference_time,
+                            }
+                        ),
+                    }
             except QueryCancelled:
                 # Renderer done-detection (streaming.ts) requires sources AND
                 # context_length in the terminal payload.

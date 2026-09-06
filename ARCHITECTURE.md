@@ -551,14 +551,20 @@ def chunk_text_semantic(self, text, source):
 
 | Endpoint | Method | Description | Request | Response |
 |----------|--------|-------------|---------|----------|
-| `/` | GET | Health check | None | `{"status": "ok"}` |
+| `/health` | GET | Health check (liveness probe) | None | `{"status": "ok", "engine_ready": bool}` |
 | `/stats` | GET | Engine statistics | None | JSON stats |
-| `/ask` | POST | Ask question | `{question, n_results}` | QueryResult |
+| `/ask` | POST | Ask question | `{question, n_results, history}` | QueryResult |
+| `/ask/stream` | POST | Ask question with SSE streaming | `{question, n_results, history}` | SSE token/done/error events |
 | `/search` | POST | Search documents | `{query}` | List of matches |
 | `/ingest` | POST | Ingest directory | `{directory}` | Stats |
-| `/ingest/file` | POST | Ingest file | `{filepath}` | Stats |
-| `/documents` | GET | List documents | None | List of filenames |
+| `/ingest/file` | POST | Ingest file | multipart file | Stats |
+| `/ingest/batch` | POST | Ingest multiple files | multipart files (max 20) | Per-file results |
+| `/documents` | GET | List documents | None | List of documents |
 | `/documents` | DELETE | Clear all | None | `{"status": "cleared"}` |
+| `/settings` | GET | Get RAG settings | None | Settings JSON |
+| `/settings` | PUT | Update RAG settings | partial `rag_*` fields | Settings JSON |
+| `/auth/status` | GET | Authentication status | None | Auth config JSON |
+| `/auth/token` | POST | Exchange API key for JWT | `{api_key}` | Token JSON |
 
 ### Request/Response Format
 
@@ -576,8 +582,7 @@ Response:
   "answer": "The main findings indicate...",
   "sources": ["report.pdf"],
   "context_length": 1500,
-  "inference_time": 1.23,
-  "chunks_retrieved": 3
+  "inference_time": 1.23
 }
 ```
 

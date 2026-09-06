@@ -55,6 +55,7 @@ Set environment variables before running the application or in your system's env
 | `RAG_MAX_TOKENS` | Max response tokens | `1024` | 512-1024 |
 | `RAG_TEMPERATURE` | LLM temperature | `0.3` | 0.1-0.5 |
 | `API_PORT` | API server port | `8080` | 8080 |
+| `API_HOST` | API server bind address. Defaults to `127.0.0.1` (loopback only); set `0.0.0.0` to expose on your LAN — enable `ENABLE_AUTH=true` if you do | `127.0.0.1` | 127.0.0.1 |
 
 ### API Authentication Variables
 

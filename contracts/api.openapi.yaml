@@ -383,10 +383,10 @@ components:
       properties:
         role:
           type: string
-          enum: [user, assistant]
+          description: Conversation role. The server accepts any string; clients send "user" or "assistant".
         content:
           type: string
-          maxLength: 4000
+          description: Turn content. Values longer than 4000 characters are truncated server-side.
     QuestionRequest:
       type: object
       required: [question]
@@ -433,38 +433,51 @@ components:
           description: RESERVED for WS-C #72 (grounded/general provenance). Not emitted yet.
           additionalProperties: true
     StreamEvent:
-      type: object
-      description: One SSE data payload (JSON) on event "message" or "error"
-      required: [variant]
-      properties:
-        variant:
-          type: string
-          enum: [token, done, error]
-        token:
-          type: string
-        done:
-          type: boolean
-        cancelled:
-          type: boolean
-        sources:
-          type: array
-          items:
-            type: string
-        context_length:
-          type: integer
-        inference_time:
-          type: number
-        error:
-          type: string
-        learn:
-          type: array
-          description: RESERVED for WS-C #72. Not emitted yet.
-          items:
-            type: object
-        grounding:
-          type: object
-          description: RESERVED for WS-C #72. Not emitted yet.
-          additionalProperties: true
+      description: |
+        One SSE `data` payload (JSON). Discriminated by field presence, NOT by a
+        variant field: a payload with `token` is a token event, one with `done`
+        (and `sources` + `context_length`) is the terminal done event, and one
+        with `error` is the terminal error event.
+      oneOf:
+        - type: object
+          title: TokenEvent
+          required: [token]
+          properties:
+            token:
+              type: string
+        - type: object
+          title: DoneEvent
+          required: [done, sources, context_length]
+          properties:
+            done:
+              type: boolean
+              enum: [true]
+            cancelled:
+              type: boolean
+              description: Present and true when generation was cancelled.
+            sources:
+              type: array
+              items:
+                type: string
+            context_length:
+              type: integer
+            inference_time:
+              type: number
+            learn:
+              type: array
+              description: RESERVED for WS-C #72. Not emitted yet.
+              items:
+                type: object
+            grounding:
+              type: object
+              description: RESERVED for WS-C #72. Not emitted yet.
+              additionalProperties: true
+        - type: object
+          title: ErrorEvent
+          required: [error]
+          properties:
+            error:
+              type: string
     IngestRequest:
       type: object
       required: [directory]
@@ -601,7 +614,7 @@ components:
         rag_rerank_top_k: { type: integer, minimum: 1, maximum: 20 }
     StatsResponse:
       type: object
-      required: [document_count, chunk_count, embedding_model, documents]
+      required: [document_count, chunk_count, embedding_model]
       properties:
         document_count: { type: integer }
         chunk_count: { type: integer }

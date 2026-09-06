@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api_server
-from api_server import app
+from api_server import CANCELLED_ANSWER, app
 from llm_interface import QueryCancelled
 
 pytestmark = pytest.mark.unit
@@ -142,6 +142,50 @@ def test_ask_stream_cancelled_reaches_renderer_done_terminal():
     # Regression: the cancelled payload must satisfy the renderer contract
     # (context_length present) or the UI never reaches its done path.
     assert "context_length" in done
+    assert not any(e == "error" for e, _ in events)
+
+
+def test_ask_stream_real_engine_style_cancel_emits_cancelled_done():
+    """Regression (PRR-007): rag_engine swallows QueryCancelled and returns a
+    sentinel result (answer == CANCELLED_ANSWER) WITHOUT setting
+    cancellation_event, so the server must detect the cancellation from the
+    result on the success path and emit the renderer-detectable
+    cancelled-done terminal. The stub mirrors the real engine exactly."""
+
+    class Engine:
+        llm = MagicMock()
+
+        def query(
+            self,
+            question,
+            n_results=6,
+            stream_callback=None,
+            conversation_history=None,
+            cancellation_event=None,
+        ):
+            assert cancellation_event is not None
+            if stream_callback:
+                stream_callback("partial ")
+            # Real-engine shape: sentinel answer, empty sources, event NOT set.
+            result = _Result()
+            result.answer = CANCELLED_ANSWER
+            result.sources = []
+            result.context_length = 0
+            return result
+
+    resp = _stream_with(Engine())
+    assert resp.status_code == 200
+
+    events = _parse_sse(resp.text)
+    terminals = [
+        p for e, p in events if isinstance(p, dict) and ("done" in p or "error" in p)
+    ]
+    assert len(terminals) == 1
+    done = terminals[0]
+    assert done.get("done") is True
+    assert done.get("cancelled") is True
+    assert done["sources"] == []
+    assert done["context_length"] == 0
     assert not any(e == "error" for e, _ in events)
 
 

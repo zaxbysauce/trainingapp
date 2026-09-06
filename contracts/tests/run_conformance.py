@@ -192,9 +192,23 @@ class Conformance:
                 try:
                     data = json.loads(data)
                 except (ValueError, TypeError):
-                    pass
+                    # Surface malformed payloads to the checks instead of
+                    # silently passing them through (PRR-011).
+                    name = "malformed"
             events.append((name, data))
         return events
+
+    SSE_BODY_CAP = 5 * 1024 * 1024
+
+    async def read_capped_stream(self, resp):
+        """Read an SSE response body with a hard byte cap (PRR-011)."""
+        chunks, total = [], 0
+        async for chunk in resp.aiter_bytes():
+            total += len(chunk)
+            if total > self.SSE_BODY_CAP:
+                raise ValueError(f"SSE body exceeds {self.SSE_BODY_CAP} byte cap")
+            chunks.append(chunk)
+        return b"".join(chunks).decode("utf-8", errors="replace")
 
     async def check_ask_stream(self):
         r = await self.post("/ask/stream", json={"question": "conformance?"})
@@ -205,7 +219,8 @@ class Conformance:
             detail += f" ctype={ctype}"
             ok = ctype.startswith("text/event-stream")
         if ok:
-            events = self.parse_sse(r.text)
+            body = await self.read_capped_stream(r)
+            events = self.parse_sse(body)
             tokens = [p for e, p in events if isinstance(p, dict) and "token" in p]
             terminals = [
                 p
@@ -223,7 +238,12 @@ class Conformance:
                 and "context_length" in terminals[0]
             )
             ok = len(tokens) >= 1 and done_ok
-            detail += f" tokens={len(tokens)} terminals={len(terminals)}"
+            malformed = sum(1 for e, _ in events if e == "malformed")
+            ok = ok and malformed == 0
+            detail += (
+                f" tokens={len(tokens)} terminals={len(terminals)}"
+                f" malformed={malformed}"
+            )
         self.record("ask_stream", ok, detail)
 
     async def check_ask_stream_cancelled(self, recorder: dict):
@@ -272,8 +292,11 @@ class Conformance:
         self.record("documents_list", ok, detail)
 
     async def check_documents_delete(self, safe: bool):
-        if safe:
-            self.skip("documents_delete", "--safe mode (destructive)")
+        if safe or not self.destructive_ok:
+            self.skip(
+                "documents_delete",
+                "destructive DELETE skipped (non-destructive mode; pass --destructive)",
+            )
             return
         r = await self.client.delete("/documents")
         ok = r.status_code == 200 and r.json().get("status") == "cleared"
@@ -350,7 +373,9 @@ class Conformance:
         self.record("contract_drift", ok, detail)
 
 
-async def run(asgi_target: str | None, base_url: str | None, safe: bool) -> int:
+async def run(
+    asgi_target: str | None, base_url: str | None, safe: bool, destructive: bool
+) -> int:
     recorder: dict = {"query_calls": 0}
     app = None
     if asgi_target:
@@ -375,12 +400,15 @@ async def run(asgi_target: str | None, base_url: str | None, safe: bool) -> int:
         recorder["cancel_engine"] = CancelEngine()
 
     transport = (
-        httpx.ASGITransport(app=app) if asgi_target else httpx.AsyncBaseTransport()
+        httpx.ASGITransport(app=app) if asgi_target else httpx.AsyncHTTPTransport()
     )
     base = "http://conformance.local" if asgi_target else base_url
     results = Conformance(
         httpx.AsyncClient(transport=transport, base_url=base), bool(asgi_target)
     )
+    # Destructive routes run only in-process (stub, nothing to lose) or when
+    # the operator explicitly opts in for a remote server.
+    results.destructive_ok = bool(asgi_target) or destructive
 
     print(
         f"Conformance target: {'asgi:' + asgi_target if asgi_target else base_url} safe={safe}"
@@ -441,8 +469,14 @@ def main() -> int:
     group.add_argument("--asgi", help="in-process target, e.g. api_server:app")
     group.add_argument("--base-url", help="running server base URL")
     ap.add_argument("--safe", action="store_true", help="skip destructive routes")
+    ap.add_argument(
+        "--destructive",
+        action="store_true",
+        help="allow destructive routes (DELETE /documents) in --base-url mode; "
+        "default is to skip them so a conformance run never wipes a live server",
+    )
     args = ap.parse_args()
-    return asyncio.run(run(args.asgi, args.base_url, args.safe))
+    return asyncio.run(run(args.asgi, args.base_url, args.safe, args.destructive))
 
 
 if __name__ == "__main__":

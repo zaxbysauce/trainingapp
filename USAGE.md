@@ -657,9 +657,9 @@ print(response.json())
 ```python
 import requests
 
-response = requests.get("http://localhost:8080/")
+response = requests.get("http://localhost:8080/health")
 print(response.json())
-# {"status": "ok"}
+# {"status": "ok", "engine_ready": true}
 ```
 
 #### Get Statistics
@@ -835,7 +835,7 @@ BASE_URL = "http://localhost:8080"
 
 def test_api():
     # Health check
-    r = requests.get(f"{BASE_URL}/")
+    r = requests.get(f"{BASE_URL}/health")
     assert r.json()['status'] == 'ok'
     print("✓ Health check passed")
 

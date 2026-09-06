@@ -150,7 +150,7 @@
 
 - **Browser ML feasibility spike** (`/ml-spike`): Diagnostic page validating Transformers.js (feature-extraction pipeline), EdgeVec (HNSW vector search), and FlexSearch (full-text indexing) on target hardware; shows pass/fail/skip status, duration, and memory delta per library
 
-- **21 backend tests** (`test_api_endpoints.py`): Comprehensive unit tests for SSE streaming, batch upload, and settings endpoints with mock engine and auth bypass fixture
+- **21 backend tests** (now `tests/test_api_endpoints.py`; moved from root level so pytest collects them): Comprehensive unit tests for SSE streaming, batch upload, and settings endpoints with mock engine and auth bypass fixture
 
 - **HTML5 Web UI (Phase 1)**: New `web_ui/` directory with Vite 6 + React 18 + TypeScript 5 project scaffold
   - Design token system translating Python theme.py (ColorTokens, TypeScale, Spacing) to CSS custom properties

@@ -650,7 +650,7 @@ print(f"BM25 index: {'Ready' if engine.vector_store.bm25_index else 'Not built'}
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Health check |
+| `/health` | GET | Health check (liveness probe) |
 | `/stats` | GET | Engine statistics |
 | `/ask` | POST | Ask a question (non-streaming) |
 | `/ask/stream` | POST | Ask a question with SSE streaming |
