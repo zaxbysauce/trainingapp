@@ -2,17 +2,18 @@
 Adversarial attack vectors against validate_url in api_server.py
 
 Targets:
-1. validate_url with allow_local=False: must STILL reject localhost, private IPs, userinfo, non-http schemes
-2. validate_url with allow_local=True: accepts localhost/127.0.0.1 but MUST STILL reject userinfo, file://, javascript://, etc.
+1. validate_url with allow_local=False: must STILL reject localhost, private IPs, userinfo, non-http schemes  # noqa: E501
+2. validate_url with allow_local=True: accepts localhost/127.0.0.1 but MUST STILL reject userinfo, file://, javascript://, etc.  # noqa: E501
 3. Edge cases: empty URL, no scheme, extremely long URLs, Unicode in hostnames
 """
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="Pre-existing failures unrelated to PR #4 — requires real embedding model, GUI runtime, or environment setup")
-import sys
-from api_server import validate_url
+pytestmark = pytest.mark.skip(
+    reason="Pre-existing failures unrelated to PR #4 — requires real embedding model, GUI runtime, or environment setup"  # noqa: E501
+)
 
+from security import validate_url  # noqa: E402
 
 # ============================================================================
 # CATEGORY 1: allow_local=False — must reject localhost, private IPs, userinfo,
@@ -406,7 +407,9 @@ class TestSSRFVectors:
     def test_ipv6_mapped_ipv4_loopback(self):
         """IPv6-mapped IPv4 loopback (::ffff:127.0.0.1)."""
         url = "http://[::ffff:127.0.0.1]:11434"
-        with pytest.raises(ValueError, match="private|localhost|standard ports|loopback"):
+        with pytest.raises(
+            ValueError, match="private|localhost|standard ports|loopback"
+        ):
             validate_url(url, allow_local=False)
 
     def test_ipv6_mapped_ipv4_loopback_allow_local(self):

@@ -1,8 +1,7 @@
-import pytest
-import os
-import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 # Test imports to verify all files can be imported without errors
@@ -46,9 +45,9 @@ def test_smartllm_initialization():
 
 def test_validate_url():
     """Test URL validation rejects localhost and accepts valid URLs."""
-    import api_server
-    import security
     from unittest.mock import patch
+
+    import security
 
     # Test valid URLs (mock DNS resolution since we may not have network access)
     valid_urls = [
@@ -62,13 +61,13 @@ def test_validate_url():
     def mock_getaddrinfo(host, *args, **kwargs):
         # Return a mock result for public hosts
         if host in ("api.example.com", "docs.example.com", "example.com"):
-            return [(2, 1, 6, '', ('93.184.216.34', 0))]  # Mock IP for example.com
+            return [(2, 1, 6, "", ("93.184.216.34", 0))]  # Mock IP for example.com
         raise Exception(f"Unknown host: {host}")
 
     for url in valid_urls:
-        with patch.object(security.socket, 'getaddrinfo', mock_getaddrinfo):
+        with patch.object(security.socket, "getaddrinfo", mock_getaddrinfo):
             try:
-                result = api_server.validate_url(url)
+                result = security.validate_url(url)
                 assert result == url
             except Exception as e:
                 pytest.fail(f"Valid URL {url} was rejected: {e}")
@@ -85,7 +84,7 @@ def test_validate_url():
 
     for url in invalid_urls:
         with pytest.raises(ValueError):
-            api_server.validate_url(url)
+            security.validate_url(url)
 
     # Test invalid URLs (private IPs)
     # We'll use a more realistic test by checking if the function handles these cases
@@ -94,19 +93,19 @@ def test_validate_url():
 
     # Test invalid URLs (no scheme)
     with pytest.raises(ValueError):
-        api_server.validate_url("example.com")
+        security.validate_url("example.com")
 
     # Test invalid URLs (invalid scheme)
     with pytest.raises(ValueError):
-        api_server.validate_url("ftp://example.com")
+        security.validate_url("ftp://example.com")
 
     # Test invalid URLs (user info)
     with pytest.raises(ValueError):
-        api_server.validate_url("http://user:pass@example.com")
+        security.validate_url("http://user:pass@example.com")
 
     # Test invalid URLs (non-standard ports)
     with pytest.raises(ValueError):
-        api_server.validate_url("http://example.com:8080")
+        security.validate_url("http://example.com:8080")
 
 
 def test_validate_model_path():
@@ -121,7 +120,7 @@ def test_validate_model_path():
         result = api_server.validate_model_path("test_model.gguf")
         # This should pass since it's not traversing up
         assert result == str(Path("test_model.gguf").resolve())
-    except Exception as e:
+    except Exception:
         # If it fails, that's okay for our validation test - the core logic is what matters
         pass
 
@@ -151,7 +150,7 @@ def test_validate_directory():
         result = api_server.validate_directory("test_dir")
         # This should pass since it's not traversing up
         assert result == str(Path("test_dir").resolve())
-    except Exception as e:
+    except Exception:
         # If it fails, that's okay for our validation test - the core logic is what matters
         pass
 
@@ -167,10 +166,8 @@ def test_validate_directory():
         api_server.validate_directory("")
 
 
-
 def test_device_validation():
     """Test device validation blocks shell metacharacters."""
-    import api_server
 
     # Test valid device strings
     valid_devices = ["cpu", "cuda", "mps"]

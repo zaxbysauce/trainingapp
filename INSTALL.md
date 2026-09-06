@@ -122,6 +122,8 @@ python main.py --cli
 python main.py --api --port 8080
 ```
 
+The API server binds to `127.0.0.1` (loopback) by default. To expose it on your LAN, set `API_HOST=0.0.0.0` — see CONFIGURATION.md for the security implications before doing so.
+
 ## Offline Bundle Installation
 
 ### Purpose

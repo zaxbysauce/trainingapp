@@ -1,0 +1,629 @@
+openapi: 3.1.0
+info:
+  title: Document Q&A API
+  version: "2.3.0"
+  description: |
+    RAG-based document question answering API.
+
+    This contract is AUTHORITATIVE for the renderer (web_ui/src/lib/api) and the
+    future Electron backend host (WS-B #61): both must implement/consume exactly
+    these paths and schemas. `contracts/tests/run_conformance.py` verifies any
+    backend against this surface (`--base-url` for a running server, `--asgi`
+    for an in-process app).
+
+    Wire notes:
+    - POST /ask/stream emits Server-Sent Events (text/event-stream). Event
+      separation is CRLF (`\r\n\r\n`); consumers MUST tolerate CRLF per the SSE
+      spec. Terminal semantics: a stream ends with exactly one `done` payload
+      (contains `sources` AND `context_length`) or one `error` payload
+      (contains `error`) — never both, never neither.
+    - Reserved fields: `learn` (array) and `grounding` (object) are RESERVED on
+      ask/ask-stream response payloads for the OpMed learning companion
+      (WS-C #72 grounded/general provenance). Servers MUST NOT rely on them and
+      clients MUST tolerate their absence. They are not emitted in this version.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local loopback server (default bind)
+tags:
+  - name: auth
+  - name: ask
+  - name: ingest
+  - name: documents
+  - name: search
+  - name: settings
+  - name: ops
+paths:
+  /health:
+    get:
+      tags: [ops]
+      summary: Unauthenticated liveness probe
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /auth/status:
+    get:
+      tags: [auth]
+      summary: Authentication status and configuration
+      operationId: getAuthStatus
+      security: []
+      responses:
+        "200":
+          description: Current auth configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatusResponse"
+  /auth/token:
+    post:
+      tags: [auth]
+      summary: Exchange an API key for a JWT bearer token
+      operationId: createToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenRequest"
+      responses:
+        "200":
+          description: Token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          description: Invalid API key
+        "503":
+          description: Authentication is not enabled on this server
+  /ask:
+    post:
+      tags: [ask]
+      summary: Ask a question (non-streaming)
+      operationId: askQuestion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestionRequest"
+      responses:
+        "200":
+          description: Answer with sources
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuestionResponse"
+        "422":
+          description: Request validation failed
+        "500":
+          description: Processing error
+        "503":
+          description: Engine not initialized / no LLM backend
+  /ask/stream:
+    post:
+      tags: [ask]
+      summary: Ask a question with SSE token streaming
+      operationId: askQuestionStream
+      description: |
+        Emits `message` events whose `data` is JSON. Data payload variants:
+        - token: `{"token": "<text>"}`
+        - done:  `{"done": true, "sources": [...], "context_length": n,
+                  "inference_time": t, "cancelled": true (only when cancelled),
+                  "learn": reserved, "grounding": reserved}`
+        - error: `{"error": "<message>"}` on `event: error`
+        Exactly one terminal (done or error) per stream. Client disconnect
+        cancels generation server-side; the cancelled stream still ends with a
+        renderer-detectable done payload (`cancelled: true`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuestionRequest"
+      responses:
+        "200":
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/StreamEvent"
+        "422":
+          description: Request validation failed
+        "503":
+          description: Engine not initialized / no LLM backend
+  /ingest:
+    post:
+      tags: [ingest]
+      summary: Ingest documents from a server-local directory
+      operationId: ingestDirectory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestRequest"
+      responses:
+        "200":
+          description: Ingestion outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+        "400":
+          description: Invalid directory path
+        "500":
+          description: Ingestion error
+        "503":
+          description: Engine not initialized
+  /ingest/file:
+    post:
+      tags: [ingest]
+      summary: Ingest a single uploaded file (multipart)
+      operationId: ingestFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: ".pdf .docx .doc .pptx .ppt .txt .md .xlsx, max 50MB"
+      responses:
+        "200":
+          description: Ingestion outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+        "400":
+          description: Missing/invalid filename or unsupported type
+        "413":
+          description: File exceeds the 50MB limit
+        "500":
+          description: Ingestion error
+        "503":
+          description: Engine not initialized
+  /ingest/batch:
+    post:
+      tags: [ingest]
+      summary: Ingest multiple uploaded files (max 20)
+      operationId: ingestBatch
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        "200":
+          description: Per-file results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchIngestResponse"
+        "400":
+          description: More than 20 files
+        "503":
+          description: Engine not initialized
+  /documents:
+    get:
+      tags: [documents]
+      summary: List ingested documents
+      operationId: listDocuments
+      responses:
+        "200":
+          description: Document list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentsResponse"
+        "503":
+          description: Engine not initialized
+    delete:
+      tags: [documents]
+      summary: Clear all ingested documents (destructive)
+      operationId: clearDocuments
+      responses:
+        "200":
+          description: Cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+        "500":
+          description: Clear error
+        "503":
+          description: Engine not initialized
+  /search:
+    post:
+      tags: [search]
+      summary: Search documents without generating an answer
+      operationId: searchDocuments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: Ranked results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SearchResult"
+        "422":
+          description: Request validation failed
+        "500":
+          description: Search error
+        "503":
+          description: Engine not initialized
+  /settings:
+    get:
+      tags: [settings]
+      summary: Get current RAG settings (no sensitive values)
+      operationId: getSettings
+      responses:
+        "200":
+          description: Current settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsResponse"
+    put:
+      tags: [settings]
+      summary: Partially update RAG settings (unknown fields are ignored)
+      operationId: updateSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdateRequest"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsResponse"
+        "400":
+          description: Cross-field validation failed (overlap >= chunk size)
+  /stats:
+    get:
+      tags: [ops]
+      summary: Engine statistics
+      operationId: getStats
+      responses:
+        "200":
+          description: Engine stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+        "503":
+          description: Engine not initialized
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, engine_ready]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        engine_ready:
+          type: boolean
+          description: True once the RAG engine is constructed (startup complete)
+    TokenRequest:
+      type: object
+      required: [api_key]
+      properties:
+        api_key:
+          type: string
+    TokenResponse:
+      type: object
+      required: [access_token, token_type]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [bearer]
+    AuthStatusResponse:
+      type: object
+      required: [enabled, jwt_available, methods]
+      properties:
+        enabled:
+          type: boolean
+        jwt_available:
+          type: boolean
+        methods:
+          type: array
+          items:
+            type: string
+            enum: [bearer, api_key]
+    HistoryTurn:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          description: Conversation role. The server accepts any string; clients send "user" or "assistant".
+        content:
+          type: string
+          description: Turn content. Values longer than 4000 characters are truncated server-side.
+    QuestionRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        n_results:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 6
+        history:
+          type: array
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/HistoryTurn"
+          description: Prior conversation turns for contextualized retrieval
+    QuestionResponse:
+      type: object
+      required: [question, answer, sources, context_length, inference_time]
+      properties:
+        question:
+          type: string
+        answer:
+          type: string
+        sources:
+          type: array
+          items:
+            type: string
+        context_length:
+          type: integer
+        inference_time:
+          type: number
+          format: float
+        learn:
+          type: array
+          description: RESERVED for WS-C #72 (OpMed learning links). Not emitted yet.
+          items:
+            type: object
+        grounding:
+          type: object
+          description: RESERVED for WS-C #72 (grounded/general provenance). Not emitted yet.
+          additionalProperties: true
+    StreamEvent:
+      description: |
+        One SSE `data` payload (JSON). Discriminated by field presence, NOT by a
+        variant field: a payload with `token` is a token event, one with `done`
+        (and `sources` + `context_length`) is the terminal done event, and one
+        with `error` is the terminal error event.
+      oneOf:
+        - type: object
+          title: TokenEvent
+          required: [token]
+          properties:
+            token:
+              type: string
+        - type: object
+          title: DoneEvent
+          required: [done, sources, context_length]
+          properties:
+            done:
+              type: boolean
+              enum: [true]
+            cancelled:
+              type: boolean
+              description: Present and true when generation was cancelled.
+            sources:
+              type: array
+              items:
+                type: string
+            context_length:
+              type: integer
+            inference_time:
+              type: number
+            learn:
+              type: array
+              description: RESERVED for WS-C #72. Not emitted yet.
+              items:
+                type: object
+            grounding:
+              type: object
+              description: RESERVED for WS-C #72. Not emitted yet.
+              additionalProperties: true
+        - type: object
+          title: ErrorEvent
+          required: [error]
+          properties:
+            error:
+              type: string
+    IngestRequest:
+      type: object
+      required: [directory]
+      properties:
+        directory:
+          type: string
+          description: Server-local directory path
+    IngestResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        documents:
+          type: integer
+        chunks_added:
+          type: integer
+        message:
+          type: string
+          nullable: true
+    BatchFileResult:
+      type: object
+      required: [filename, success]
+      properties:
+        filename:
+          type: string
+        success:
+          type: boolean
+        chunks_added:
+          type: integer
+        error:
+          type: string
+          nullable: true
+    BatchIngestResponse:
+      type: object
+      required: [total_files, successful, failed, results]
+      properties:
+        total_files:
+          type: integer
+        successful:
+          type: integer
+        failed:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/BatchFileResult"
+    DocumentsResponse:
+      type: object
+      required: [documents, total]
+      properties:
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentInfo"
+        total:
+          type: integer
+    DocumentInfo:
+      type: object
+      required: [id, chunk_count]
+      properties:
+        id:
+          type: string
+          description: Document source path
+        chunk_count:
+          type: integer
+    SearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 500
+        n_results:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+    SearchResult:
+      type: object
+      required: [text, source, similarity]
+      properties:
+        text:
+          type: string
+        source:
+          type: string
+        similarity:
+          type: number
+          format: float
+    SettingsResponse:
+      type: object
+      required:
+        - chunk_size
+        - chunk_overlap
+        - n_results
+        - min_similarity
+        - temperature
+        - max_tokens
+        - hybrid_search
+        - reranking_enabled
+        - context_truncation
+        - retrieval_window
+        - initial_retrieval_top_k
+        - rerank_top_k
+      properties:
+        chunk_size: { type: integer }
+        chunk_overlap: { type: integer }
+        n_results: { type: integer }
+        min_similarity: { type: number }
+        temperature: { type: number }
+        max_tokens: { type: integer }
+        hybrid_search: { type: boolean }
+        reranking_enabled: { type: boolean }
+        context_truncation: { type: integer }
+        retrieval_window: { type: integer }
+        initial_retrieval_top_k: { type: integer }
+        rerank_top_k: { type: integer }
+    SettingsUpdateRequest:
+      type: object
+      description: Field names are the rag_* settings keys; omitted fields are unchanged.
+      properties:
+        rag_chunk_size: { type: integer, minimum: 128, maximum: 8192 }
+        rag_chunk_overlap: { type: integer, minimum: 0 }
+        rag_n_results: { type: integer, minimum: 1, maximum: 10 }
+        rag_min_similarity: { type: number, minimum: 0, maximum: 1 }
+        rag_temperature: { type: number, minimum: 0, maximum: 2 }
+        rag_max_tokens: { type: integer, minimum: 256, maximum: 4096 }
+        rag_hybrid_search: { type: boolean }
+        rag_reranking_enabled: { type: boolean }
+        rag_context_truncation: { type: integer, minimum: 1 }
+        rag_retrieval_window: { type: integer, minimum: 0 }
+        rag_initial_retrieval_top_k: { type: integer, minimum: 1, maximum: 50 }
+        rag_rerank_top_k: { type: integer, minimum: 1, maximum: 20 }
+    StatsResponse:
+      type: object
+      required: [document_count, chunk_count, embedding_model]
+      properties:
+        document_count: { type: integer }
+        chunk_count: { type: integer }
+        embedding_model: { type: string }
+        llm_backend: { type: string, nullable: true }
+        documents:
+          type: array
+          items: { type: string }
+security:
+  - {}
+  - bearerAuth: []
+  - apiKeyHeader: []
