@@ -408,8 +408,20 @@ async function runLeg({ browserExe, modelPath, coopCoep, nThreads, promptTokens,
     await cdp.send('Page.enable', {}, sessionId);
     await cdp.send('Page.navigate', { url }, sessionId);
     await cdp.waitForEvent('Page.loadEventFired', 30_000, (e) => e.sessionId === sessionId);
-    // The page sets window.__benchResult when done (or on error).
-    const expr = 'new Promise((resolve) => { const t0 = Date.now(); const poll = () => { if (window.__benchResult) return resolve(JSON.stringify(window.__benchResult)); if (Date.now() - t0 > ' + (RUN_BUDGET_MS - 20_000) + ') return resolve(JSON.stringify({ outcome: "fail", error: "bench page timeout" })); setTimeout(poll, 250); }; poll(); })';
+    // The page sets window.__benchResult when done (or on error). The
+    // timeout fallback carries the same provenance keys a leg-failure row
+    // would, so append_results can record it.
+    const pageTimeoutRow = JSON.stringify({
+      surface: 'wllama',
+      model: modelNameFor(modelPath),
+      mode,
+      threads: nThreads,
+      prompt_tokens: promptTokens,
+      machine: machineTag(),
+      outcome: 'fail',
+      error: 'bench page timeout',
+    });
+    const expr = 'new Promise((resolve) => { const t0 = Date.now(); const poll = () => { if (window.__benchResult) return resolve(JSON.stringify(window.__benchResult)); if (Date.now() - t0 > ' + (RUN_BUDGET_MS - 20_000) + ') return resolve(' + JSON.stringify(pageTimeoutRow) + '); setTimeout(poll, 250); }; poll(); })';
     const result = await cdp.send('Runtime.evaluate', {
       expression: expr,
       awaitPromise: true,

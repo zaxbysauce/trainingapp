@@ -58,11 +58,12 @@ different machine.
 One row per (model x quant x threads x prompt length); decode tok/s over the
 generated tokens after the first, `first_token_ms` measured from generation
 start to the first streamed token (llama-bench engine reports a value derived
-from prompt-processing throughput and marks it `derived`).
+from prompt-processing throughput and marks it `derived`). All 36
+reference-i5 matrix cells are PENDING until the laptop run; dev-station
+cells are appended per recorded run.
 
 | machine | model | quant | threads | prompt_tokens | decode_tok_s | first_token_ms | peak_rss_mb | engine | outcome |
 |---|---|---|---|---|---|---|---|---|---|
-| reference-i5 | (all 36 matrix cells) | Q4_K_M/Q5_K_M | 4/8 | 1024/2048/3072 | PENDING | PENDING | PENDING | PENDING | PENDING |
 | devstation | lfm2.5-vl-450m | Q4_K_M | 4 | 1024 | 95.97 | 1200.1 | 496.7 | llama-cpp-python | pass |
 | devstation | lfm2.5-vl-450m | Q4_K_M | 8 | 1024 | 80.15 | 1311.9 | 497.3 | llama-cpp-python | pass |
 | devstation | gemma-4-e2b-it | Q4_K_M | 4 | 1024 | 3.65 | 36813 | 2761.2 | llama-cpp-python | pass |
@@ -87,8 +88,8 @@ stripped (corporate-proxy simulation), crossOriginIsolated false, n_threads 1.
 
 | machine | model | mode | threads | prompt_tokens | decode_tok_s | first_token_ms | outcome |
 |---|---|---|---|---|---|---|---|
-| reference-i5 | lfm2.5-vl-450m Q4_K_M | threaded | >1 | 256 | PENDING | PENDING | PENDING |
-| reference-i5 | lfm2.5-vl-450m Q4_K_M | single | 1 | 256 | PENDING | PENDING | PENDING |
+| reference-i5 | lfm2.5-vl-450m | threaded | 4 | 256 | PENDING | PENDING | PENDING |
+| reference-i5 | lfm2.5-vl-450m | single | 1 | 256 | PENDING | PENDING | PENDING |
 | devstation | lfm2.5-vl-450m | threaded | 4 | 256 | 51.83 | 658.1 | pass |
 | devstation | lfm2.5-vl-450m | single | 1 | 256 | 52.34 | 662.9 | pass |
 
@@ -101,14 +102,14 @@ Thread count: 4 (mirrors the desktop `n_threads` default, config.py:57).
 
 | machine | model | encode_ms | embeddings_per_second | outcome |
 |---|---|---|---|---|
-| reference-i5 | bge-small-en-v1.5 (embed) | PENDING | PENDING | PENDING |
-| reference-i5 | snowflake-arctic-embed-m-v1.5 (embed) | PENDING | PENDING | PENDING |
+| reference-i5 | bge-small-en-v1.5 | PENDING | PENDING | PENDING |
+| reference-i5 | snowflake-arctic-embed-m-v1.5 | PENDING | PENDING | PENDING |
+| devstation | bge-small-en-v1.5 | 3.317 | 526.2 | pass |
+| devstation | snowflake-arctic-embed-m-v1.5 | 4.954 | 288.6 | pass |
 
 | machine | model | top15_ms | top30_ms | outcome |
 |---|---|---|---|---|
-| reference-i5 | ettin-reranker-32m-v1 (rerank) | PENDING | PENDING | PENDING |
-| devstation | bge-small-en-v1.5 | 3.317 | 526.2 | pass |
-| devstation | snowflake-arctic-embed-m-v1.5 | 4.954 | 288.6 | pass |
+| reference-i5 | ettin-reranker-32m-v1 | PENDING | PENDING | PENDING |
 | devstation | ettin-reranker-32m-v1 | 2.66 | 2.67 | pass |
 
 ## Reproducing on the reference laptop

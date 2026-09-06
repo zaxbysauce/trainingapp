@@ -5,7 +5,9 @@ Rows are inserted as markdown table lines in the section matching the row's
 surface, into the table whose header cells match that surface's schema, tagged
 with their machine tag. The append is fail-closed:
 
-  - the row must carry every key its surface requires (per-surface schema);
+  - the row must carry its provenance keys (surface, machine, outcome), and a
+    PASS row must additionally carry every measured key its surface requires
+    (per-surface schema);
   - the row's machine tag must exist in the "## Machine registry" section;
   - a row whose identity cells (machine + configuration columns) already exist
     in the target table aborts the append - existing recorded measurements are
@@ -67,7 +69,9 @@ HEADER_CELLS = {
     "onnx-rerank": ["machine", "model", "top15_ms", "top30_ms", "outcome"],
 }
 
-# surface -> keys a driver row must carry before it may be recorded.
+# surface -> keys a recorded PASS row must carry. Fail rows carry the crash,
+# not measurements (crash-as-data, RESULTS.md provenance rule 3): only
+# ALWAYS_REQUIRED provenance keys are required of them.
 REQUIRED_KEYS = {
     "native": (
         "surface",
@@ -101,6 +105,9 @@ REQUIRED_KEYS = {
     ),
     "onnx-rerank": ("surface", "model", "top15_ms", "top30_ms", "machine", "outcome"),
 }
+
+# Provenance keys every row (pass or fail) must carry.
+ALWAYS_REQUIRED = ("surface", "machine", "outcome")
 
 # surface -> indices of the rendered cells that form the row's identity (the
 # columns two runs must agree on to count as the same measurement). Measured
@@ -190,7 +197,14 @@ def validate_row(row: dict) -> None:
     surface = str(row.get("surface", ""))
     if surface not in SECTION_HEADINGS:
         raise SystemExit(f"unknown surface: {surface!r}")
-    missing = [k for k in REQUIRED_KEYS[surface] if row.get(k) in (None, "")]
+    required = ALWAYS_REQUIRED
+    if str(row.get("outcome", "")).strip().lower() == "pass":
+        required = REQUIRED_KEYS[surface]
+        # Accepted debt (ledger W-M4): a 1-token generation has no decodable
+        # span, so the driver records outcome=pass with a null decode rate.
+        if row.get("tokens_generated") == 1:
+            required = tuple(k for k in required if k != "decode_tokens_per_second")
+    missing = [k for k in required if row.get(k) in (None, "")]
     if missing:
         raise SystemExit(
             f"row for surface {surface!r} missing required keys: {', '.join(missing)}"
@@ -266,6 +280,7 @@ def append_row(row: dict, results_path: Path = RESULTS) -> None:
     insert_at, body_rows = find_target_table(lines, heading, surface)
 
     ident_idx = IDENTITY_CELLS[surface]
+    outcome_idx = HEADER_CELLS[surface].index("outcome")
     cells = row_cells(row)
     identity = [str(cells[i]) for i in ident_idx]
     new_line = row_to_markdown(row)
@@ -273,7 +288,7 @@ def append_row(row: dict, results_path: Path = RESULTS) -> None:
         existing = split_row(lines[ridx])
         if len(existing) != len(cells) or [existing[i] for i in ident_idx] != identity:
             continue
-        if existing[-1].strip() == "PENDING":
+        if existing[outcome_idx].strip() == "PENDING":
             # A PENDING placeholder occupies this identity slot: filling it in
             # is the runbook flow, not an overwrite of a recorded measurement.
             lines[ridx] = new_line
