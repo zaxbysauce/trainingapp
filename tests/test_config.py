@@ -7,11 +7,13 @@ Covers:
 3. Default values and CORS origins parsing
 """
 
-import pytest
+import importlib
 import os
 import sys
-import importlib
 from pathlib import Path
+
+import pytest
+
 import config  # noqa: F401 — used for importlib.reload
 
 # Ensure project root is on path
@@ -22,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 1. CONFIG VALIDATION TESTS
 # ---------------------------------------------------------------------------
 
+
 class TestRAGMinSimilarityValidation:
     """RAG_MIN_SIMILARITY must be between 0.0 and 1.0 inclusive."""
 
@@ -30,6 +33,7 @@ class TestRAGMinSimilarityValidation:
         monkeypatch.setenv("RAG_MIN_SIMILARITY", "0.0")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_min_similarity == 0.0
 
@@ -38,6 +42,7 @@ class TestRAGMinSimilarityValidation:
         monkeypatch.setenv("RAG_MIN_SIMILARITY", "1.0")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_min_similarity == 1.0
 
@@ -46,6 +51,7 @@ class TestRAGMinSimilarityValidation:
         monkeypatch.setenv("RAG_MIN_SIMILARITY", "0.5")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_min_similarity == 0.5
 
@@ -54,6 +60,7 @@ class TestRAGMinSimilarityValidation:
         monkeypatch.setenv("RAG_MIN_SIMILARITY", "1.5")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises(ValueError, match="must be between 0.0 and 1.0"):
             RAGSettings()
 
@@ -62,6 +69,7 @@ class TestRAGMinSimilarityValidation:
         monkeypatch.setenv("RAG_MIN_SIMILARITY", "-0.1")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises(ValueError, match="must be between 0.0 and 1.0"):
             RAGSettings()
 
@@ -70,6 +78,7 @@ class TestRAGMinSimilarityValidation:
         monkeypatch.setenv("RAG_MIN_SIMILARITY", "not_a_number")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises((ValueError, TypeError)):
             RAGSettings()
 
@@ -82,6 +91,7 @@ class TestRAGChunkSizeValidation:
         monkeypatch.setenv("RAG_CHUNK_SIZE", "512")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_chunk_size == 512
 
@@ -90,6 +100,7 @@ class TestRAGChunkSizeValidation:
         monkeypatch.setenv("RAG_CHUNK_SIZE", "4096")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_chunk_size == 4096
 
@@ -98,6 +109,7 @@ class TestRAGChunkSizeValidation:
         monkeypatch.setenv("RAG_CHUNK_SIZE", "-5")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises(ValueError, match="must be between 128 and 8192"):
             RAGSettings()
 
@@ -106,6 +118,7 @@ class TestRAGChunkSizeValidation:
         monkeypatch.setenv("RAG_CHUNK_SIZE", "0")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises(ValueError, match="must be between 128 and 8192"):
             RAGSettings()
 
@@ -114,6 +127,7 @@ class TestRAGChunkSizeValidation:
         monkeypatch.setenv("RAG_CHUNK_SIZE", "abc")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises((ValueError, TypeError)):
             RAGSettings()
 
@@ -127,6 +141,7 @@ class TestRAGChunkOverlapValidation:
         monkeypatch.setenv("RAG_CHUNK_OVERLAP", "50")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_chunk_overlap == 50
         assert s.rag_chunk_size == 512
@@ -137,6 +152,7 @@ class TestRAGChunkOverlapValidation:
         monkeypatch.setenv("RAG_CHUNK_OVERLAP", "0")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_chunk_overlap == 0
 
@@ -146,6 +162,7 @@ class TestRAGChunkOverlapValidation:
         monkeypatch.setenv("RAG_CHUNK_OVERLAP", "-5")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises(ValueError, match="must be non-negative"):
             RAGSettings()
 
@@ -155,6 +172,7 @@ class TestRAGChunkOverlapValidation:
         monkeypatch.setenv("RAG_CHUNK_OVERLAP", "512")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises(ValueError, match="must be less than RAG_CHUNK_SIZE"):
             RAGSettings()
 
@@ -164,6 +182,7 @@ class TestRAGChunkOverlapValidation:
         monkeypatch.setenv("RAG_CHUNK_OVERLAP", "600")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises(ValueError, match="must be less than RAG_CHUNK_SIZE"):
             RAGSettings()
 
@@ -176,6 +195,7 @@ class TestRAGTemperatureValidation:
         monkeypatch.setenv("RAG_TEMPERATURE", "0.3")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_temperature == 0.3
 
@@ -184,6 +204,7 @@ class TestRAGTemperatureValidation:
         monkeypatch.setenv("RAG_TEMPERATURE", "2.0")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_temperature == 2.0
 
@@ -192,6 +213,7 @@ class TestRAGTemperatureValidation:
         monkeypatch.setenv("RAG_TEMPERATURE", "2.5")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises(ValueError, match="must be between 0.0 and 2.0"):
             RAGSettings()
 
@@ -200,6 +222,7 @@ class TestRAGTemperatureValidation:
         monkeypatch.setenv("RAG_TEMPERATURE", "-0.1")
         importlib.reload(config)
         from config import RAGSettings
+
         with pytest.raises(ValueError, match="must be between 0.0 and 2.0"):
             RAGSettings()
 
@@ -207,6 +230,7 @@ class TestRAGTemperatureValidation:
 # ---------------------------------------------------------------------------
 # 2. DEFAULT VALUES
 # ---------------------------------------------------------------------------
+
 
 class TestDefaultValues:
     """All settings have appropriate defaults matching previous hardcoded values."""
@@ -218,6 +242,7 @@ class TestDefaultValues:
             if key.startswith("RAG_"):
                 monkeypatch.delenv(key, raising=False)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_db_path == "./doc_qa_db"
         assert s.rag_chunk_size == 512
@@ -235,6 +260,7 @@ class TestDefaultValues:
     def test_global_settings_instance_exists(self):
         """The global `settings` instance is accessible."""
         from config import settings
+
         assert settings is not None
         assert hasattr(settings, "rag_min_similarity")
         assert hasattr(settings, "rag_chunk_size")
@@ -243,6 +269,7 @@ class TestDefaultValues:
 # ---------------------------------------------------------------------------
 # 3. CONFIG USAGE TESTS
 # ---------------------------------------------------------------------------
+
 
 class TestConfigUsage:
     """engine_factory.py and api_server.py correctly use the config module."""
@@ -261,7 +288,8 @@ class TestConfigUsage:
         monkeypatch.setenv("RAG_RERANKING_ENABLED", "true")
         monkeypatch.setenv("RAG_DB_PATH", "/custom/db")
         importlib.reload(config)
-        from config import RAGSettings, settings
+        from config import RAGSettings
+
         # Access settings attr to trigger lazy init with current env vars
         s = RAGSettings()
         assert s.rag_min_similarity == 0.75
@@ -288,7 +316,7 @@ class TestConfigUsage:
         """api_server imports settings from config module."""
         api_server_path = Path(__file__).parent.parent / "api_server.py"
         source = api_server_path.read_text()
-        assert "from config import settings" in source
+        assert "from config import get_settings, settings" in source
 
 
 class TestCORsOriginsParsing:
@@ -299,6 +327,7 @@ class TestCORsOriginsParsing:
         monkeypatch.setenv("RAG_CORS_ORIGINS", "http://localhost,http://127.0.0.1")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         origins = s.get_cors_origins_list()
         assert origins == ["http://localhost", "http://127.0.0.1"]
@@ -308,15 +337,20 @@ class TestCORsOriginsParsing:
         monkeypatch.setenv("RAG_CORS_ORIGINS", "https://example.com")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         origins = s.get_cors_origins_list()
         assert origins == ["https://example.com"]
 
     def test_cors_origins_multiple(self, monkeypatch):
         """Multiple comma-separated origins parse correctly."""
-        monkeypatch.setenv("RAG_CORS_ORIGINS", "http://localhost:3000, https://example.com , http://127.0.0.1:8080")
+        monkeypatch.setenv(
+            "RAG_CORS_ORIGINS",
+            "http://localhost:3000, https://example.com , http://127.0.0.1:8080",
+        )
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         origins = s.get_cors_origins_list()
         assert origins == [
@@ -327,9 +361,12 @@ class TestCORsOriginsParsing:
 
     def test_cors_origins_whitespace_trimmed(self, monkeypatch):
         """Whitespace around origins is trimmed."""
-        monkeypatch.setenv("RAG_CORS_ORIGINS", "  http://localhost  ,  http://127.0.0.1  ")
+        monkeypatch.setenv(
+            "RAG_CORS_ORIGINS", "  http://localhost  ,  http://127.0.0.1  "
+        )
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         origins = s.get_cors_origins_list()
         assert origins == ["http://localhost", "http://127.0.0.1"]
@@ -339,6 +376,7 @@ class TestCORsOriginsParsing:
         monkeypatch.setenv("RAG_CORS_ORIGINS", "")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         origins = s.get_cors_origins_list()
         assert origins == [""]
@@ -347,6 +385,7 @@ class TestCORsOriginsParsing:
 # ---------------------------------------------------------------------------
 # 4. EDGE CASES & ADVERSARIAL INPUTS
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     """Boundary and adversarial inputs for config validation."""
@@ -357,6 +396,7 @@ class TestEdgeCases:
         monkeypatch.setenv("RAG_MIN_SIMILARITY", "0.0001")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_min_similarity == 0.0001
 
@@ -364,6 +404,7 @@ class TestEdgeCases:
         monkeypatch.setenv("RAG_MIN_SIMILARITY", "0.9999")
         importlib.reload(config)
         from config import RAGSettings
+
         s2 = RAGSettings()
         assert s2.rag_min_similarity == 0.9999
 
@@ -373,6 +414,7 @@ class TestEdgeCases:
         monkeypatch.setenv("RAG_TEMPERATURE", "0.0")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_temperature == 0.0
 
@@ -380,6 +422,7 @@ class TestEdgeCases:
         monkeypatch.setenv("RAG_TEMPERATURE", "2.0")
         importlib.reload(config)
         from config import RAGSettings
+
         s2 = RAGSettings()
         assert s2.rag_temperature == 2.0
 
@@ -389,6 +432,7 @@ class TestEdgeCases:
             monkeypatch.setenv("RAG_HYBRID_SEARCH", val)
             importlib.reload(config)
             from config import RAGSettings
+
             s = RAGSettings()
             assert s.rag_hybrid_search is True, f"Failed for {val}"
 
@@ -398,6 +442,7 @@ class TestEdgeCases:
             monkeypatch.setenv("RAG_HYBRID_SEARCH", val)
             importlib.reload(config)
             from config import RAGSettings
+
             s = RAGSettings()
             assert s.rag_hybrid_search is False, f"Failed for {val}"
 
@@ -406,6 +451,7 @@ class TestEdgeCases:
         monkeypatch.setenv("RAG_RERANKING_ENABLED", "true")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_reranking_enabled is True
 
@@ -415,6 +461,7 @@ class TestEdgeCases:
         monkeypatch.setenv("RAG_CHUNK_OVERLAP", "100")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         assert s.rag_chunk_size == 8192
 
@@ -426,6 +473,7 @@ class TestEdgeCases:
         monkeypatch.setenv("RAG_N_RESULTS", "-1")
         importlib.reload(config)
         from config import RAGSettings
+
         s = RAGSettings()
         # Config allows it; RAGConfig should reject it at engine creation time
         assert s.rag_n_results == -1
@@ -439,15 +487,18 @@ class TestEdgeCases:
 # 5. LAZY SINGLETON & SETTINGS PROXY TESTS
 # ---------------------------------------------------------------------------
 
+
 class TestSettingsProxyAndSingleton:
     """_SettingsProxy delegates correctly; get_settings() is idempotent."""
 
     def test_get_settings_returns_singleton(self, clear_env):
         """get_settings() returns the same instance on repeated calls."""
         import config
+
         # Reset the global singleton so test is order-independent
         config._settings = None
         from config import get_settings
+
         instance1 = get_settings()
         instance2 = get_settings()
         assert instance1 is instance2
@@ -455,8 +506,10 @@ class TestSettingsProxyAndSingleton:
     def test_settings_proxy_getattr_delegates(self, clear_env):
         """settings.xxx transparently delegates to the lazy RAGSettings."""
         import config
+
         config._settings = None  # Reset
         from config import settings
+
         # Trigger lazy init by accessing an attribute
         val = settings.rag_min_similarity
         assert isinstance(val, float)
@@ -465,8 +518,10 @@ class TestSettingsProxyAndSingleton:
     def test_settings_proxy_repr(self, clear_env):
         """repr(settings) returns the repr of the underlying RAGSettings."""
         import config
+
         config._settings = None  # Reset
         from config import settings
+
         r = repr(settings)
         # Should contain the RAGSettings class name or the dict-like repr
         assert "RAGSettings" in r or "rag_db_path" in r
@@ -474,8 +529,10 @@ class TestSettingsProxyAndSingleton:
     def test_settings_proxy_setattr(self, clear_env):
         """settings.xxx = val sets the attribute on the lazy RAGSettings."""
         import config
+
         config._settings = None  # Reset
         from config import settings
+
         settings.rag_min_similarity = 0.42
         assert settings.rag_min_similarity == 0.42
         # Reset for other tests
@@ -484,13 +541,23 @@ class TestSettingsProxyAndSingleton:
     def test_all_settings_attributes_accessible_via_proxy(self, clear_env):
         """Every field on RAGSettings is accessible via the settings proxy."""
         import config
+
         config._settings = None  # Reset
         from config import settings
+
         attrs = [
-            "rag_db_path", "rag_chunk_size", "rag_chunk_overlap",
-            "rag_n_results", "rag_min_similarity", "rag_retrieval_window",
-            "rag_max_tokens", "rag_temperature", "rag_embedding_model",
-            "rag_hybrid_search", "rag_reranking_enabled", "rag_cors_origins",
+            "rag_db_path",
+            "rag_chunk_size",
+            "rag_chunk_overlap",
+            "rag_n_results",
+            "rag_min_similarity",
+            "rag_retrieval_window",
+            "rag_max_tokens",
+            "rag_temperature",
+            "rag_embedding_model",
+            "rag_hybrid_search",
+            "rag_reranking_enabled",
+            "rag_cors_origins",
         ]
         for attr in attrs:
             # Accessing should not raise AttributeError
@@ -500,6 +567,7 @@ class TestSettingsProxyAndSingleton:
 # ---------------------------------------------------------------------------
 # FIXTURES
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def clear_env(monkeypatch):
