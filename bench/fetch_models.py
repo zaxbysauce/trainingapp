@@ -58,6 +58,14 @@ def is_lfs_pointer(p: Path) -> bool:
         return False
 
 
+def _asset_path(assets_root: Path, models_relative: str) -> Path:
+    """Resolve a 'models/...' repo-relative path against --assets-dir."""
+    rel = Path(models_relative)
+    if rel.parts and rel.parts[0] == "models":
+        rel = Path(*rel.parts[1:])
+    return assets_root / rel
+
+
 def asset_status(assets_root: Path) -> list:
     rows = []
     ggufs = [
@@ -76,7 +84,7 @@ def asset_status(assets_root: Path) -> list:
         ("gemma-3-1b-it Q5_K_M", "models/gemma-3-1b-it/model-Q5_K_M.gguf"),
     ]
     repo, fname, dest = BGE_SAFETENSORS
-    p = assets_root / dest.split("models/", 1)[1] if False else REPO_ROOT / dest
+    p = _asset_path(assets_root, dest)
     rows.append(
         {
             "asset": f"{repo}:{fname}",
@@ -89,13 +97,13 @@ def asset_status(assets_root: Path) -> list:
     for label, _, candidates, dest_dir in ONNX_ASSETS:
         found = None
         for cand in candidates:
-            cp = REPO_ROOT / dest_dir / cand
+            cp = _asset_path(assets_root, dest_dir) / cand
             if cp.is_file() and cp.stat().st_size > 1024 and not is_lfs_pointer(cp):
                 found = str(cp)
                 break
         rows.append({"asset": label, "path": found, "present": found is not None})
     for label, rel in ggufs:
-        p = REPO_ROOT / rel
+        p = _asset_path(assets_root, rel)
         rows.append(
             {
                 "asset": label,
@@ -179,13 +187,12 @@ def main(argv=None) -> int:
     overrides = dict(o.split("=", 1) for o in args.onnx_repo if "=" in o)
     if args.embed_weights:
         repo, fname, dest = BGE_SAFETENSORS
-        download(repo, fname, REPO_ROOT / dest)
+        download(repo, fname, _asset_path(assets_root, dest))
     if args.onnx:
         for label, repo, candidates, dest_dir in ONNX_ASSETS:
             for cand in candidates:
-                if (REPO_ROOT / dest_dir / cand).is_file() and not is_lfs_pointer(
-                    REPO_ROOT / dest_dir / cand
-                ):
+                staged = _asset_path(assets_root, dest_dir) / cand
+                if staged.is_file() and not is_lfs_pointer(staged):
                     print(f"[OK] {label}: {cand} already staged")
                     break
             else:
@@ -198,13 +205,17 @@ def main(argv=None) -> int:
                             "run: git lfs pull"
                         )
                         continue
-                download(repo, candidates[0], REPO_ROOT / dest_dir / candidates[0])
+                download(
+                    repo,
+                    candidates[0],
+                    _asset_path(assets_root, dest_dir) / candidates[0],
+                )
     for spec in args.gguf:
         parts = spec.split(":")
         if len(parts) != 3:
             raise SystemExit(f"--gguf expects REPO:FILE:DEST, got: {spec}")
         repo, fname, dest = parts
-        download(repo, fname, REPO_ROOT / dest)
+        download(repo, fname, _asset_path(assets_root, dest))
     return 0
 
 

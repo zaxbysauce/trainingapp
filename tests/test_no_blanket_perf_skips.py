@@ -20,6 +20,16 @@ Two tiers:
 
 Sanctioned gate form (negative control): conditional
 ``pytest.mark.skipif(<artifact check>, reason=<names the artifact>)``.
+
+Detector coverage: module-level ``pytestmark`` skips, blanket skip
+decorators, constant-literal skipif conditions (``True``/``False``/``1``/
+``0`` are never artifact gates - one direction always skips, the other is a
+decorative gate), and unguarded inline ``pytest.skip()`` calls inside test
+bodies (recognized guarded shapes: the skip sits on an ``if``/``elif`` line,
+or the preceding meaningful line is an ``except ...:`` / ``if ...:`` /
+``elif ...:`` guard or a ``try:``/``else:``/``finally:``/``with ...:``
+opener). Perf suites allow zero of any of these; everywhere else the sites
+are frozen in the two-sided registers below.
 """
 
 import re
@@ -38,19 +48,42 @@ MODULE_SKIP_RE = re.compile(
     r"^\s*pytestmark\s*=\s*pytest\.mark\.skip\s*\(", re.MULTILINE
 )
 SKIP_IF_TRUE_RE = re.compile(
-    r"^\s*pytestmark\s*=\s*pytest\.mark\.skipif\s*\(\s*True\s*,", re.MULTILINE
+    r"^\s*pytestmark\s*=\s*pytest\.mark\.skipif\s*\(\s*(?:True|False|1|0)\s*,",
+    re.MULTILINE,
 )
 DECORATOR_SKIP_RE = re.compile(
     r"@pytest\.mark\.skip\s*\(\s*reason\s*=\s*(?P<q>[\"'])(?P<reason>.+?)(?P=q)\s*\)",
     re.DOTALL,
 )
+# Inline pytest.skip("...") inside test bodies; only sites that the guard
+# classifier in _inline_skip_is_unconditional cannot recognize as conditional
+# count as blanket skips.
+INLINE_SKIP_RE = re.compile(r"pytest\.skip\s*\(\s*[\"'](?P<reason>[^\"']*)")
 
-PERF_SUITE_ALLOWLIST = frozenset(
-    {
-        "test_rag_performance.py",
-        "test_low_end_hardware.py",
-    }
-)
+
+def _inline_skip_is_unconditional(lines: "list[str]", idx: int) -> bool:
+    """True when the pytest.skip site at lines[idx] has no lexical guard.
+
+    Guarded shapes (return False): the skip sits on an ``if``/``elif`` line,
+    or the preceding meaningful line is an ``except ...:`` / ``if ...:`` /
+    ``elif ...:`` guard or a ``try:`` / ``else:`` / ``finally:`` /
+    ``with ...:`` block opener.
+    """
+    stripped = lines[idx].strip()
+    if stripped.startswith(("if ", "elif ")):
+        return False
+    j = idx - 1
+    while j >= 0 and (not lines[j].strip() or lines[j].strip().startswith("#")):
+        j -= 1
+    prev = lines[j].strip() if j >= 0 else ""
+    if prev.startswith("except "):
+        return False
+    if prev.startswith(("if ", "elif ")) and prev.endswith(":"):
+        return False
+    if prev in ("try:", "else:", "finally:") or prev.startswith("with "):
+        return False
+    return True
+
 
 # Shared justification for every tier-2 module-skip entry (kept short to
 # satisfy E501; the audit detail lives in the issue #52 trace artifacts).
@@ -222,6 +255,38 @@ DECORATOR_ALLOWLIST = {
 }
 
 
+def _inline_entry(reason: str, sites: int) -> dict:
+    """Register entry keyed exactly as the detector truncates reasons."""
+    return {reason[:60]: {"reason": reason[:60], "sites": sites}}
+
+
+# Tier-2c debt register (issue #52 review sweep, 2026-09-06): unguarded
+# inline pytest.skip() call sites, exact (file, reason prefix) -> site count.
+# Two-sided like the other registers: a new unlisted site fails, and an entry
+# that no longer matches any live site fails as stale.
+INLINE_ALLOWLIST = {
+    "integration/test_gguf_wiring.py": _inline_entry("ChromaDB KeyError ", 1),
+    "integration/test_workflows.py": {
+        **_inline_entry("Engine not initialized - skipping ingestion tests", 1),
+        **_inline_entry("Engine not initialized", 2),
+    },
+    "test_accessibility.py": _inline_entry("MockCTkEntry missing ", 1),
+    "test_engine_factory.py": _inline_entry(
+        "OS null-byte env var behavior differs on CI — DID NOT RAISE ValueError", 1
+    ),
+    "test_full_council_adversarial.py": _inline_entry(
+        "Source code inspection test — bare CTkButton found in _create_widgets", 1
+    ),
+    "test_gguf_path_wiring_final.py": _inline_entry("ChromaDB KeyError ", 2),
+    "test_phase1_adversarial.py": _inline_entry(
+        "Windows 8.3 short name path mismatch on CI — temp path case differs", 2
+    ),
+    "test_vector_store.py": _inline_entry(
+        "Embedding similarity is non-deterministic across Python versions", 1
+    ),
+}
+
+
 class TestNoBlanketPerfSkips:
     def test_positive_control_matches(self):
         """The module-skip detector must match the unconditional form."""
@@ -238,6 +303,46 @@ class TestNoBlanketPerfSkips:
         assert not MODULE_SKIP_RE.search(sanctioned)
         assert not SKIP_IF_TRUE_RE.search(sanctioned)
 
+    def test_constant_literal_skipif_matches(self):
+        """Constant-literal skipif conditions are blanket forms in either
+        direction: True/1 always skip, False/0 is a decorative gate."""
+        for lit in ("True", "1", "False", "0"):
+            text = "pytestmark = pytest.mark.skipif(%s, reason='x')" % lit
+            assert SKIP_IF_TRUE_RE.search(text), lit
+        assert not SKIP_IF_TRUE_RE.search(
+            "pytestmark = pytest.mark.skipif(not _HAS_WEIGHTS,\n"
+            "                               reason='weights')\n"
+        )
+
+    def test_inline_skip_detector_controls(self):
+        """Guarded inline shapes must not flag; the bare test-body skip must."""
+        guarded = [
+            "try:\n"
+            "    import customtkinter\n"
+            "except ImportError:\n"
+            "    pytest.skip('customtkinter not installed')\n",
+            "if weights is None:\n    pytest.skip('weights not staged')\n",
+            "if not _HAS_ENGINE:\n"
+            "    pytest.skip('engine missing')\n"
+            "run_bench()\n",
+        ]
+        for text in guarded:
+            lines = text.splitlines()
+            hits = [
+                i
+                for i, ln in enumerate(lines)
+                if INLINE_SKIP_RE.search(ln) and _inline_skip_is_unconditional(lines, i)
+            ]
+            assert hits == [], text
+        unconditional = "def test_x():\n    pytest.skip('non-deterministic')\n"
+        lines = unconditional.splitlines()
+        hits = [
+            i
+            for i, ln in enumerate(lines)
+            if INLINE_SKIP_RE.search(ln) and _inline_skip_is_unconditional(lines, i)
+        ]
+        assert hits == [1]
+
     def test_perf_suites_have_no_unconditional_skips(self):
         """Tier 1: perf-evidence suites must gate on artifacts, never skip
         blanket (the exact class issue #52 fixed)."""
@@ -248,6 +353,13 @@ class TestNoBlanketPerfSkips:
             text = path.read_text(encoding="utf-8", errors="replace")
             if MODULE_SKIP_RE.search(text) or SKIP_IF_TRUE_RE.search(text):
                 offenders.append(f"{path.name}: module-level blanket skip")
+            lines = text.splitlines()
+            for i, ln in enumerate(lines):
+                match = INLINE_SKIP_RE.search(ln)
+                if match and _inline_skip_is_unconditional(lines, i):
+                    offenders.append(
+                        f"{path.name}:{i + 1}: unguarded inline pytest.skip()"
+                    )
             for match in DECORATOR_SKIP_RE.finditer(text):
                 line = text[: match.start()].count("\n") + 1
                 offenders.append(f"{path.name}:{line}: blanket skip decorator")
@@ -318,5 +430,41 @@ class TestNoBlanketPerfSkips:
         assert not offenders, "; ".join(offenders)
         assert not stale, (
             "stale DECORATOR_ALLOWLIST entries (skip was converted or removed "
+            "- delete the entry): " + "; ".join(stale)
+        )
+
+    def test_inline_skips_match_allowlist(self):
+        """Tier 2c: unguarded inline pytest.skip() calls are frozen debt."""
+        live = {}
+        for path in sorted(TESTS_DIR.rglob("test_*.py")):
+            if path.name == Path(__file__).name:
+                continue
+            rel = str(path.relative_to(TESTS_DIR)).replace("\\", "/")
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            for i, ln in enumerate(lines):
+                match = INLINE_SKIP_RE.search(ln)
+                if match and _inline_skip_is_unconditional(lines, i):
+                    reason = match.group("reason")[:60]
+                    live.setdefault(rel, {})
+                    live[rel][reason] = live[rel].get(reason, 0) + 1
+        offenders, stale = [], []
+        for f, reasons in live.items():
+            entries = INLINE_ALLOWLIST.get(f, {})
+            for reason, n in reasons.items():
+                entry = entries.get(reason)
+                if entry is None:
+                    offenders.append(f"{f}: unallowlisted inline skip {reason[:50]!r}")
+                elif entry["sites"] != n:
+                    offenders.append(
+                        f"{f}: {n} inline site(s) for {reason[:40]!r} but the "
+                        f"register records {entry['sites']}"
+                    )
+        for f, entries in INLINE_ALLOWLIST.items():
+            for reason in entries:
+                if reason not in live.get(f, {}):
+                    stale.append(f"{f}: {reason[:40]!r}")
+        assert not offenders, "; ".join(offenders)
+        assert not stale, (
+            "stale INLINE_ALLOWLIST entries (skip was converted or removed "
             "- delete the entry): " + "; ".join(stale)
         )

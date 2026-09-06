@@ -75,7 +75,8 @@ def feed_inputs(session, encoding) -> dict:
     """Map a tokenizers Encoding onto whatever inputs the ONNX graph declares."""
     ids = [encoding.ids]
     mask = [encoding.attention_mask]
-    types = [encoding.type_ids]
+    # Encodings from tokenizers without token_type_ids omit the attribute.
+    types = [getattr(encoding, "type_ids", None) or [0] * len(encoding.ids)]
     feed = {}
     for inp in session.get_inputs():
         name = inp.name.lower()
@@ -172,7 +173,8 @@ def bench_embed(assets: Path, entry: dict) -> dict:
         def pad(e):
             ids = e.ids + [pad_id] * (max_len - len(e.ids))
             mask = e.attention_mask + [0] * (max_len - len(e.attention_mask))
-            types = e.type_ids + [0] * (max_len - len(e.type_ids))
+            e_types = getattr(e, "type_ids", None) or [0] * len(e.ids)
+            types = e_types + [0] * (max_len - len(e_types))
             return ids, mask, types
 
         padded = [pad(e) for e in batch_encs]
@@ -187,7 +189,8 @@ def bench_embed(assets: Path, entry: dict) -> dict:
                 feed_b[inp.name] = [p[2] for p in padded]
         t0 = time.perf_counter()
         out_b = session.run(None, feed_b)
-        batch_s = time.perf_counter() - t0
+        # Guard against a sub-tick measurement dividing by zero.
+        batch_s = max(time.perf_counter() - t0, 1e-9)
         mean_pool(
             out_b[0],
             feed_b[

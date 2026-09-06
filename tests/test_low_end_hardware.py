@@ -13,6 +13,7 @@ Uses pytest with resource limit simulation via monkeypatching and timing analysi
 
 import gc
 import importlib.util
+import math
 import os
 import shutil
 import sys
@@ -76,23 +77,6 @@ pytestmark = [
         ),
     ),
 ]
-
-
-def _perf_threshold(
-    metric: str, legacy: float, model: str = "bge-small-en-v1.5", surface: str = "rag"
-):
-    """(value, direction, source): bench/RESULTS.md floors row for the current
-    machine when recorded, else the suite's legacy generous bound."""
-    try:
-        from bench.floors import threshold
-
-        found = threshold(_REPO_ROOT / "bench" / "RESULTS.md", surface, model, metric)
-    except Exception:
-        found = None
-    if found is None:
-        return legacy, "ceiling", "legacy-bound"
-    value, direction = found
-    return value, direction, "bench/RESULTS.md floors"
 
 
 # Test modules - try to import, skip if unavailable
@@ -308,7 +292,9 @@ class TestLimitedRAM:
             assert len(chunks) > 0
             # The RSS delta may legitimately be negative (GC frees between
             # samples); tracking "works" means psutil returned a finite sample.
-            assert isinstance(mem_increase, (int, float)), "Memory tracking should work"
+            assert isinstance(mem_increase, (int, float)) and math.isfinite(
+                mem_increase
+            ), "Memory tracking should work"
 
             # Verify no critical warnings under normal conditions
             if len(chunks) < 5000:
@@ -626,10 +612,18 @@ class TestSlowDisk:
         """Test model loading time with disk I/O delays."""
         from vector_store import EmbeddingModel
 
-        # Measure baseline model load time
-        start = time.time()
+        # Warm the model first: a cold first load vs a warm second load makes
+        # the comparison order-dependent (the cold load can outlast the
+        # simulated 0.1s delay, flaking full-suite runs). Baseline and slow
+        # loads must be measured under identical cache conditions.
+        EmbeddingModel()
+
+        # Measure baseline model load time. perf_counter: a warm constructor
+        # can finish inside one time.time() tick (~15ms on Windows), which
+        # floors the baseline at exactly 0.0 and trips the > 0 assert.
+        start = time.perf_counter()
         model = EmbeddingModel()
-        baseline_load_time = time.time() - start
+        baseline_load_time = time.perf_counter() - start
 
         assert baseline_load_time > 0, "Model loading should be timed"
 
@@ -641,9 +635,9 @@ class TestSlowDisk:
             original_init(self, model_name)
 
         with patch.object(EmbeddingModel, "__init__", slow_init):
-            start = time.time()
+            start = time.perf_counter()
             slow_model = EmbeddingModel()
-            slow_load_time = time.time() - start
+            slow_load_time = time.perf_counter() - start
 
         # Slow disk simulation should increase load time
         assert (
@@ -1272,7 +1266,9 @@ class TestResourceLimitWarnings:
             # Document findings. The RSS delta may legitimately be negative
             # (imports freed between baseline and workload); tracking "works"
             # means psutil returned a finite sample, not a positive delta.
-            assert isinstance(mem_used, (int, float)), "Memory tracking should work"
+            assert isinstance(mem_used, (int, float)) and math.isfinite(
+                mem_used
+            ), "Memory tracking should work"
             assert mem_after > 0, "Process RSS should stay positive"
             assert total_time > 0, "Time tracking should work"
 

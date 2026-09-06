@@ -12,7 +12,8 @@
  *     crossOriginIsolated === false, SAB unavailable, n_threads forced to 1 —
  *     the deterministic path the browser takes when the headers are stripped.
  *
- * Zero new npm dependencies: node:http static server (Range-capable for
+ * Zero new npm dependencies: requires Node >= 22.5 (built-in WebSocket
+ * global for the CDP connection); node:http static server (Range-capable for
  * wllama's byte-range fetches), Node's built-in WebSocket for CDP, headless
  * Edge/Chrome. wllama assets resolve from web_ui/node_modules when present,
  * else from the pinned jsdelivr CDN (network required in that case).
@@ -80,6 +81,12 @@ function parseArgs(argv) {
 // Static server (Range-capable; COOP/COEP only when enabled for the leg)
 // ---------------------------------------------------------------------------
 
+function modelNameFor(modelPath) {
+  const stem = path.basename(modelPath).replace(/\.gguf$/i, '');
+  const dir = path.basename(path.dirname(modelPath));
+  return stem === 'model' || stem === 'gguf' ? dir : stem;
+}
+
 function startServer({ port, coopCoep, modelPath, localEsm }) {
   const state = { server: null, port };
   const server = http.createServer((req, res) => {
@@ -128,10 +135,20 @@ function startServer({ port, coopCoep, modelPath, localEsm }) {
           'Content-Range': `bytes ${start}-${end}/${size}`,
           'Content-Length': end - start + 1,
         });
-        fs.createReadStream(modelPath, { start, end }).pipe(res);
+        fs.createReadStream(modelPath, { start, end })
+          .on('error', (err) => {
+            log(`model stream error: ${err.message}`);
+            res.destroy(err);
+          })
+          .pipe(res);
       } else {
         res.writeHead(200, { ...base, 'Content-Length': size });
-        fs.createReadStream(modelPath).pipe(res);
+        fs.createReadStream(modelPath)
+          .on('error', (err) => {
+            log(`model stream error: ${err.message}`);
+            res.destroy(err);
+          })
+          .pipe(res);
       }
       return undefined;
     }
@@ -156,6 +173,7 @@ function benchPage() {
 <body><div id="status">booting</div>
 <script type="module">
 const q = new URLSearchParams(location.search);
+const modelName = q.get('modelName') || 'unknown';
 const statusEl = document.getElementById('status');
 const setStage = (s) => { statusEl.textContent = s; };
 
@@ -195,7 +213,7 @@ async function run() {
   const machine = q.get('machine') || 'devstation';
   const row = {
     surface: 'wllama',
-    model: 'lfm2.5-vl-450m',
+    model: modelName,
     mode,
     threads: nThreads,
     prompt_tokens: promptTokens,
@@ -371,6 +389,7 @@ async function runLeg({ browserExe, modelPath, coopCoep, nThreads, promptTokens,
   try {
     const url = `http://127.0.0.1:${port}/bench.html?` + new URLSearchParams({
       modelUrl: '/model.gguf',
+      modelName: modelNameFor(modelPath),
       indexUrl,
       wasmUrl,
       nThreads: String(nThreads),
@@ -413,15 +432,24 @@ async function runLeg({ browserExe, modelPath, coopCoep, nThreads, promptTokens,
 async function runBothModes(opts) {
   const rows = [];
   for (const m of MODES) {
-    const row = await runLeg({
-      browserExe: opts.browser,
-      modelPath: opts.model,
-      coopCoep: m.coop_coep,
-      nThreads: m.threads,
-      promptTokens: opts.promptTokens,
-      maxTokens: opts.maxTokens,
-      mode: m.mode,
-    });
+    let row;
+    try {
+      row = await runLeg({
+        browserExe: opts.browser,
+        modelPath: opts.model,
+        coopCoep: m.coop_coep,
+        nThreads: m.threads,
+        promptTokens: opts.promptTokens,
+        maxTokens: opts.maxTokens,
+        mode: m.mode,
+      });
+    } catch (err) {
+      // Isolate per-leg failures so one broken mode cannot discard the
+      // other mode's already-recorded row.
+      row = { surface: 'wllama', model: modelNameFor(opts.model), mode: m.mode,
+              threads: m.threads, machine: machineTag(),
+              outcome: 'fail', error: String(err && err.message || err).slice(0, 400) };
+    }
     if (row.outcome !== 'pass') log(`mode=${m.mode} FAILED: ${row.error || 'unknown'}`);
     rows.push(row);
   }

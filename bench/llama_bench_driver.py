@@ -186,6 +186,15 @@ def make_prompt(tokenizer, target_tokens: int) -> str:
     return tokenizer.decode(ids)
 
 
+def model_display_name(model_path: Path) -> str:
+    """RESULTS.md model cell for a GGUF path: the directory name for the
+    canonical asset layouts (model.gguf, model-<QUANT>.gguf, gguf.gguf),
+    the file stem otherwise."""
+    if model_path.stem in ("model", "gguf") or model_path.stem.startswith("model-"):
+        return model_path.parent.name
+    return model_path.stem
+
+
 def run_with_llama_cpp(
     model_path: Path, quant: str, threads: int, prompt_tokens: int, max_tokens: int
 ) -> dict:
@@ -201,9 +210,7 @@ def run_with_llama_cpp(
         "surface": "native",
         "engine": "llama-cpp-python",
         "llama_cpp_python": getattr(llama_cpp, "__version__", "unknown"),
-        "model": model_path.parent.name
-        if model_path.stem in ("model", "gguf")
-        else model_path.stem,
+        "model": model_display_name(model_path),
         "model_path": str(model_path),
         "quant": quant,
         "threads": threads,
@@ -292,16 +299,18 @@ def run_with_llama_bench(
         cmd.extend(extra_args)
     sampler = RssSampler()
     sampler.start()
-    proc = subprocess.run(
-        cmd, capture_output=True, text=True, errors="replace", timeout=900
-    )
+    timed_out = False
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, errors="replace", timeout=900
+        )
+    except subprocess.TimeoutExpired:
+        timed_out = True
     peak_rss_mb = sampler.stop()
     row = {
         "surface": "native",
         "engine": "llama-bench",
-        "model": model_path.parent.name
-        if model_path.stem in ("model", "gguf")
-        else model_path.stem,
+        "model": model_display_name(model_path),
         "model_path": str(model_path),
         "quant": quant,
         "threads": threads,
@@ -310,6 +319,14 @@ def run_with_llama_bench(
         "machine": machine_tag(),
         "peak_rss_mb": peak_rss_mb,
     }
+    if timed_out:
+        row.update(
+            {
+                "outcome": "fail",
+                "error": "llama-bench timed out after 900s",
+            }
+        )
+        return row
     if proc.returncode != 0:
         row.update(
             {
@@ -361,19 +378,22 @@ def run_with_llama_bench(
     return row
 
 
-def run_vulkan_attempt(vulkan_bin: str, model_path) -> dict:
+def run_vulkan_attempt(vulkan_bin: str, model_path, quant_arg: str = "Q4_K_M") -> dict:
     """Recorded Vulkan attempt: crash-as-data, this mode always exits 0."""
+
+    def model_label() -> str:
+        # RESULTS.md vulkan table documents the model cell as "<model> <quant>"
+        # so appended rows are reproducible from the driver alone.
+        return f"{model_display_name(model_path)} {quant_arg}"
+
     row = {
         "surface": "native-vulkan",
         "engine": "llama-bench",
-        "bin": vulkan_bin,
-        "model": (
-            model_path.parent.name
-            if model_path.stem in ("model", "gguf")
-            else model_path.stem
-        )
-        if model_path
-        else None,
+        # Portable label for RESULTS.md (absolute paths are machine-specific);
+        # the full path is preserved in bin_path for provenance.
+        "bin": "llama-bench (vulkan build)",
+        "bin_path": vulkan_bin,
+        "model": model_label() if model_path else None,
         "machine": machine_tag(),
     }
     if not vulkan_bin or not Path(vulkan_bin).is_file():
@@ -554,7 +574,7 @@ def main(argv=None) -> int:
                 alt = assets_dir() / "lfm2.5-vl-450m" / "model.gguf"
                 model_path = alt if alt.is_file() else None
         vulkan_bin = args.bin or os.environ.get("LLAMA_BENCH_BIN", "")
-        emit([run_vulkan_attempt(vulkan_bin, model_path)], args.json)
+        emit([run_vulkan_attempt(vulkan_bin, model_path, args.quant)], args.json)
         return 0  # crash-as-data: the attempt mode never fails the harness
 
     if args.run_one:

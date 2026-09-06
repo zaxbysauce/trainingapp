@@ -77,7 +77,7 @@ the known failure mode motivating the crash-as-data rule.
 | machine | model | bin | decode_tok_s | outcome | crash |
 |---|---|---|---|---|---|
 | reference-i5 | gemma-4-e2b-it Q4_K_M | llama-bench (vulkan build) | PENDING | PENDING | PENDING |
-| devstation | gemma-4-e2b-it Q4_K_M | E:/ZCode/trainingapp/.agents/issue-traces/issue-52-benchmark-harness/tools/llama-vulkan/llama-bench.exe | 402.57 | pass | - |
+| devstation | gemma-4-e2b-it Q4_K_M | llama-bench (vulkan build) | 402.57 | pass | - |
 
 ## wllama (browser WASM) results
 
